@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/connect/connect_screen.dart';
-import '../features/home/home_screen.dart';
+import '../features/sessions/sessions_screen.dart';
 import '../state/connection_notifier.dart';
 import '../theme/presets.dart';
 import '../theme/tokens.dart';
@@ -31,6 +31,10 @@ class AccentOverrideNotifier extends Notifier<Color?> {
 final accentOverrideProvider =
     NotifierProvider<AccentOverrideNotifier, Color?>(AccentOverrideNotifier.new);
 
+/// The sessions screen subscribes to this so polling runs only while it is
+/// the top route.
+final ompRouteObserver = RouteObserver<PageRoute<Object?>>();
+
 class OmpApp extends ConsumerWidget {
   const OmpApp({super.key});
 
@@ -45,7 +49,8 @@ class OmpApp extends ConsumerWidget {
       theme: OmpTheme.data(OmpPreset.paper, accent: accent),
       darkTheme: OmpTheme.data(darkPreset, accent: accent),
       themeMode: ThemeMode.system,
-      home: connection.signedIn ? const HomeScreen() : const ConnectScreen(),
+      navigatorObservers: [ompRouteObserver],
+      home: connection.signedIn ? const SessionsScreen() : const ConnectScreen(),
     );
   }
 }

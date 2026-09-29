@@ -3,13 +3,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:ohmypi/app/app.dart';
-import 'package:ohmypi/features/home/home_screen.dart';
+import 'package:ohmypi/features/sessions/sessions_screen.dart';
 import 'package:ohmypi/state/connection_notifier.dart';
 import 'package:ohmypi/state/connection_store.dart';
+import 'package:ohmypi/state/reviewed_store.dart';
+import 'package:ohmypi/state/sessions_store.dart';
 
 class MockConnectionPrefs extends Mock implements ConnectionPrefs {}
 
 class MockTokenStore extends Mock implements TokenStore {}
+
+class _MemoryKv implements ReviewedKv {
+  final Map<String, String> _map = {};
+
+  @override
+  Future<String?> get(String key) async => _map[key];
+
+  @override
+  Future<void> set(String key, String value) async => _map[key] = value;
+}
 
 void main() {
   late MockConnectionPrefs prefs;
@@ -29,6 +41,11 @@ void main() {
         overrides: [
           connectionPrefsProvider.overrideWithValue(prefs),
           tokenStoreProvider.overrideWithValue(tokens),
+          // The signed-in shell starts polling and reads the reviewed store;
+          // neither can touch real plugin channels in a widget test.
+          sessionsPollIntervalProvider
+              .overrideWithValue(const Duration(hours: 1)),
+          reviewedKvProvider.overrideWithValue(_MemoryKv()),
         ],
         child: const OmpApp(),
       );
@@ -39,7 +56,7 @@ void main() {
     expect(find.text('Connect to ohmypi'), findsOneWidget);
     expect(find.text('Gateway URL'), findsOneWidget);
     expect(find.text('Gateway token'), findsOneWidget);
-    expect(find.byType(HomeScreen), findsNothing);
+    expect(find.byType(SessionsScreen), findsNothing);
   });
 
   testWidgets('sign in switches to the home shell', (tester) async {
@@ -50,8 +67,11 @@ void main() {
     // The token field sits under the label text; find it by index instead.
     await tester.enterText(find.byType(TextField).at(1), 'tok');
     await tester.tap(find.text('Sign in'));
-    await tester.pumpAndSettle();
+    // The signed-in shell shows a skeleton spinner while the first sessions
+    // fetch is in flight, so a fixed pump instead of pumpAndSettle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.byType(SessionsScreen), findsOneWidget);
   });
 }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug only: allow cleartext to loopback so `adb reverse tcp:9325 tcp:9325`
+     lets a test device reach a test gateway at http://127.0.0.1:9325.
+     Release builds keep cleartext disabled (no override in src/main or src/release). -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

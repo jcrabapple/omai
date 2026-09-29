@@ -4,4 +4,9 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Debug builds only: cleartext for the loopback test gateway
+         (adb reverse tcp:9325). The main manifest never sets this attribute,
+         so release builds keep the platform default (no cleartext). -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
 </manifest>
