@@ -232,6 +232,16 @@ void main() {
       expect(updates, hasLength(1));
     });
 
+    test('permission is asked once, in the foreground, when a turn first runs',
+        () async {
+      final h = Harness();
+      h.coordinator.update(snapshot(running: false));
+      expect(h.surface.count('permission'), 0);
+      h.coordinator.update(snapshot(running: true));
+      h.coordinator.update(snapshot(running: true, tool: 'bash'));
+      expect(h.surface.count('permission'), 1);
+    });
+
     test(
       'Android refusing the service start falls back to the pause',
       () async {
