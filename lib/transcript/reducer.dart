@@ -316,6 +316,7 @@ void _applyUser(_Work d, Map<String, Object?> m, _Ctx ctx,
       d.items[i] = prev.copyWith(
         pending: false,
         note: note,
+        clearNote: note == null,
         messageKey: key,
         timestamp: messageTimestamp(m),
         raw: m,

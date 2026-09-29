@@ -78,6 +78,29 @@ void main() {
   Color renderedColor(WidgetTester tester, String message) =>
       tester.widget<Text>(find.text(message)).style!.color!;
 
+  testWidgets('tapping Test with an empty URL shows the validation message',
+      (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        connectionPrefsProvider.overrideWithValue(prefs),
+        tokenStoreProvider.overrideWithValue(tokens),
+        gatewayClientFactoryProvider.overrideWithValue((url, token) =>
+            GatewayClient(
+                baseUrl: url,
+                token: token,
+                client: MockClient((_) async => _json({})),
+                timeout: const Duration(seconds: 2))),
+      ],
+      child: MaterialApp(theme: OmpTheme.data(OmpPreset.paper), home: const ConnectScreen()),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.text('Test connection'));
+    await tester.pump();
+
+    expect(find.text('Enter the gateway URL first.'), findsOneWidget);
+  });
+
   testWidgets('a failed WS leg shows red even though the copy contains OK',
       (tester) async {
     await pump(

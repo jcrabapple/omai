@@ -65,28 +65,34 @@ class UserItem extends Item {
     String? text,
     int? images,
     bool? pending,
-    Object? note = _sentinel,
-    Object? stale = _sentinel,
-    Object? failed = _sentinel,
-    Object? error = _sentinel,
-    Object? timestamp = _sentinel,
-    Object? localId = _sentinel,
-    Object? messageKey = _sentinel,
-    Object? raw = _sentinel,
+    UserNote? note,
+    bool clearNote = false,
+    bool? stale,
+    bool? failed,
+    String? error,
+    bool clearError = false,
+    int? timestamp,
+    bool clearTimestamp = false,
+    String? localId,
+    bool clearLocalId = false,
+    String? messageKey,
+    bool clearMessageKey = false,
+    Object? raw,
+    bool clearRaw = false,
   }) =>
       UserItem(
         id: id ?? this.id,
         text: text ?? this.text,
         images: images ?? this.images,
         pending: pending ?? this.pending,
-        note: note == _sentinel ? this.note : note as UserNote?,
-        stale: stale == _sentinel ? this.stale : stale as bool?,
-        failed: failed == _sentinel ? this.failed : failed as bool?,
-        error: error == _sentinel ? this.error : error as String?,
-        timestamp: timestamp == _sentinel ? this.timestamp : timestamp as int?,
-        localId: localId == _sentinel ? this.localId : localId as String?,
-        messageKey: messageKey == _sentinel ? this.messageKey : messageKey as String?,
-        raw: raw == _sentinel ? this.raw : raw,
+        note: clearNote ? null : (note ?? this.note),
+        stale: stale ?? this.stale,
+        failed: failed ?? this.failed,
+        error: clearError ? null : (error ?? this.error),
+        timestamp: clearTimestamp ? null : (timestamp ?? this.timestamp),
+        localId: clearLocalId ? null : (localId ?? this.localId),
+        messageKey: clearMessageKey ? null : (messageKey ?? this.messageKey),
+        raw: clearRaw ? null : (raw ?? this.raw),
       );
 
   @override
@@ -197,15 +203,17 @@ class ThinkingItem extends Item {
 
   ThinkingItem copyWith({
     bool? streaming,
-    Object? startedAt = _sentinel,
-    Object? endedAt = _sentinel,
+    int? startedAt,
+    bool clearStartedAt = false,
+    int? endedAt,
+    bool clearEndedAt = false,
   }) =>
       ThinkingItem(
         id: id,
         text: text,
         streaming: streaming ?? this.streaming,
-        startedAt: startedAt == _sentinel ? this.startedAt : startedAt as int?,
-        endedAt: endedAt == _sentinel ? this.endedAt : endedAt as int?,
+        startedAt: clearStartedAt ? null : (startedAt ?? this.startedAt),
+        endedAt: clearEndedAt ? null : (endedAt ?? this.endedAt),
         messageKey: messageKey,
         raw: raw,
       );
@@ -263,9 +271,14 @@ class ToolItem extends Item {
 
   ToolItem copyWith({
     ToolStatus? status,
-    Object? details = _sentinel,
-    Object? files = _sentinel,
-    Object? messageKey = _sentinel,
+    Object? details,
+    bool clearDetails = false,
+    List<FileChange>? files,
+    bool clearFiles = false,
+    String? messageKey,
+    bool clearMessageKey = false,
+    Object? raw,
+    bool clearRaw = false,
   }) =>
       ToolItem(
         id: id,
@@ -276,12 +289,12 @@ class ToolItem extends Item {
         intent: intent,
         output: output,
         status: status ?? this.status,
-        details: details == _sentinel ? this.details : details,
-        files: files == _sentinel ? this.files : files as List<FileChange>?,
+        details: clearDetails ? null : (details ?? this.details),
+        files: clearFiles ? null : (files ?? this.files),
         startedAt: startedAt,
         endedAt: endedAt,
-        messageKey: messageKey == _sentinel ? this.messageKey : messageKey as String?,
-        raw: raw,
+        messageKey: clearMessageKey ? null : (messageKey ?? this.messageKey),
+        raw: clearRaw ? null : (raw ?? this.raw),
       );
 
   @override
@@ -390,15 +403,16 @@ class NoticeItem extends Item {
   NoticeItem copyWith({
     String? level,
     String? text,
-    Object? tag = _sentinel,
-    Object? active = _sentinel,
+    NoticeTag? tag,
+    bool clearTag = false,
+    bool? active,
   }) =>
       NoticeItem(
         id: id,
         level: level ?? this.level,
         text: text ?? this.text,
-        tag: tag == _sentinel ? this.tag : tag as NoticeTag?,
-        active: active == _sentinel ? this.active : active as bool?,
+        tag: clearTag ? null : (tag ?? this.tag),
+        active: active ?? this.active,
         messageKey: messageKey,
         raw: raw,
       );
@@ -415,4 +429,3 @@ class NoticeItem extends Item {
       };
 }
 
-const _sentinel = Object();

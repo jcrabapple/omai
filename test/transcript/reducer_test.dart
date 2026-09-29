@@ -1118,22 +1118,26 @@ void main() {
       expect((s.items.single as ToolItem).files, isNull);
     });
 
-    test('copyWith can clear nullable fields', () {
+    test('copyWith keeps fields on null and clears with explicit flags', () {
       const files = [FileChange(path: 'a', op: 'write', diff: '', adds: 0, dels: 0, created: true)];
       final tool = ToolItem(
               id: 'tool:t', toolCallId: 't', toolName: 'write', summary: '', output: '', status: 'done')
           .copyWith(files: files);
-      expect(tool.copyWith(files: null).files, isNull);
-      expect(tool.copyWith(files: null).status, 'done');
+      expect(tool.copyWith(files: null).files, files,
+          reason: 'a null argument keeps the current value');
+      expect(tool.copyWith(clearFiles: true).files, isNull);
+      expect(tool.copyWith(files: const []).files, const <FileChange>[],
+          reason: 'an empty list is a value, not a clear');
+      expect(tool.copyWith(files: const []).status, 'done');
       final user = const UserItem(id: 'u', text: 'hi', images: 0, pending: false, failed: true)
           .copyWith(failed: null);
-      expect(user.failed, isNull);
+      expect(user.failed, isTrue, reason: 'null keeps; bools have no clear flag');
       final notice = const NoticeItem(id: 'n', level: 'info', text: 'x', tag: 'retry', active: true)
-          .copyWith(tag: null, active: null);
+          .copyWith(clearTag: true);
       expect(notice.tag, isNull);
-      expect(notice.active, isNull);
+      expect(notice.active, isTrue);
       final thinking = const ThinkingItem(id: 'th', text: 't', streaming: false, startedAt: 1, endedAt: 2)
-          .copyWith(startedAt: null, endedAt: null);
+          .copyWith(clearStartedAt: true, clearEndedAt: true);
       expect(thinking.startedAt, isNull);
       expect(thinking.endedAt, isNull);
     });
