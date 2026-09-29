@@ -11,9 +11,11 @@ import '../../api/errors.dart';
 import '../../api/models.dart';
 import '../../format.dart';
 import '../../state/connection_notifier.dart';
+import '../../state/session_controller.dart';
 import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/model_picker.dart';
+import 'dart:async';
 
 /// Web `DEFAULT_CWD`: where a session starts when the field is left at the
 /// placeholder. Kept as a const so tests can pin it.
@@ -52,11 +54,13 @@ List<String> recentCwds(List<SessionInfo> live, List<SavedSession> saved) {
 }
 
 /// Opens the sheet. [onCreated] runs after a successful create, before the
-/// sheet closes; the caller opens the session screen there.
+/// sheet closes; the caller opens the session screen there. [initialPrompt]
+/// (Task F share intents) is sent as the first prompt right after create.
 Future<void> showNewSessionSheet(
   BuildContext context,
   WidgetRef ref, {
   required ValueChanged<SessionInfo> onCreated,
+  String? initialPrompt,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -65,16 +69,21 @@ Future<void> showNewSessionSheet(
       padding:
           EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
       child: SingleChildScrollView(
-        child: NewSessionSheet(onCreated: onCreated),
+        child: NewSessionSheet(
+            onCreated: onCreated, initialPrompt: initialPrompt),
       ),
     ),
   );
 }
 
 class NewSessionSheet extends ConsumerStatefulWidget {
-  const NewSessionSheet({super.key, required this.onCreated});
+  const NewSessionSheet({super.key, required this.onCreated, this.initialPrompt});
 
   final ValueChanged<SessionInfo> onCreated;
+
+  /// First prompt to send once the session exists (share intent); null keeps
+  /// the plain create flow.
+  final String? initialPrompt;
 
   @override
   ConsumerState<NewSessionSheet> createState() => _NewSessionSheetState();
@@ -140,6 +149,13 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
       // that would remove the session route instead of this sheet.
       Navigator.of(context).pop();
       widget.onCreated(info);
+      // Share intent: the shared text becomes the session's first prompt.
+      final prompt = widget.initialPrompt?.trim() ?? '';
+      if (prompt.isNotEmpty) {
+        unawaited(ref
+            .read(sessionControllerProvider(info.gwId).notifier)
+            .send(prompt));
+      }
     } on GatewayClientError catch (e) {
       if (!mounted) return;
       // Includes the bare-429 session cap: the gateway's own message shows.

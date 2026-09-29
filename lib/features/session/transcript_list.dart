@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import '../../theme/tokens.dart';
 import '../../transcript/blocks.dart';
 import '../../transcript/items.dart' show UserItem;
+import '../../widgets/items/inspector_sheet.dart' show showInspectorSheet;
 import '../../widgets/transcript_item.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -247,6 +248,17 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
                   key: ValueKey('view:${b.key}'),
                   item: (b as ItemBlock).item,
                   callbacks: TranscriptItemCallbacks(
+                    onInspect: (raw) =>
+                        showInspectorSheet(context, raw: raw),
+                    // Retry the last turn via omp's /retry command, only
+                    // offered while the session is idle.
+                    onRetryTurn: state.running
+                        ? null
+                        : () => ref
+                            .read(sessionControllerProvider(
+                                widget.state.gwId)
+                            .notifier)
+                            .send('/retry'),
                     onRetrySend:
                         b.item is UserItem &&
                             (b.item as UserItem).failed == true

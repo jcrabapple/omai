@@ -76,6 +76,9 @@ class FakeGateway {
   Map<String, Object?> infoJson = {};
   List<Object?> messages;
   int status;
+
+  /// GET /state payload (queued count, todoPhases).
+  Map<String, Object?> stateBody = {};
   final List<String> paths = [];
 
   /// Request bodies by path suffix, for asserting prompt/answer payloads.
@@ -118,7 +121,7 @@ class FakeGateway {
           return _json(infoJson);
         }
         if (req.url.path.endsWith('/state')) {
-          return _json({});
+          return _json(stateBody);
         }
         if (req.url.path.endsWith('/stats')) {
           return _json({'data': {}});
@@ -135,6 +138,7 @@ ProviderContainer makeContainer({
   required SocketHub hub,
   FakeScheduler? scheduler,
   MemoryReviewedKv? reviewedKv,
+  DateTime Function()? now,
 }) {
   final sched = scheduler ?? FakeScheduler();
   final container = ProviderContainer(overrides: [
@@ -158,7 +162,8 @@ ProviderContainer makeContainer({
         baseUrl: 'https://g',
         token: 'tok',
         socketFactory: hub.factory,
-        scheduler: sched)),
+        scheduler: sched,
+        now: now ?? DateTime.now)),
   ]);
   container.read(connectionNotifierProvider.notifier).state =
       ConnectionState(connections: const [
@@ -703,6 +708,144 @@ void main() {
       final s = container.read(sessionControllerProvider('abc'));
       expect(s.slashCommands.map((x) => x.name), contains('compact'));
       expect(s.commands, contains('compact'));
+    });
+  });
+
+  group('E1: turn stats, reconnects and the plan', () {
+    test('TTFT and tokens per second are computed from event timing with a '
+        'fake clock', () async {
+      var ms = 1000;
+      final gateway = FakeGateway(infoJson: infoJson());
+      final hub = SocketHub();
+      final container = makeContainer(
+          gateway: gateway, hub: hub, now: () => DateTime.fromMillisecondsSinceEpoch(ms));
+      final sub = container.listen(
+          sessionControllerProvider('abc'), (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
+
+      hub.current.frame(1, {'type': 'agent_start'}); // clock: 1000
+      ms = 1600; // TTFT: 600 ms
+      hub.current.frame(2, {
+        'type': 'message_update',
+        'message': {
+          'role': 'assistant',
+          'content': [
+            {'type': 'text', 'text': 'working'},
+          ],
+          'timestamp': 100,
+        },
+      });
+      ms = 6600;
+      hub.current.frame(3, {
+        'type': 'message_end',
+        'messageId': 'm-1',
+        'message': {
+          'role': 'assistant',
+          'content': [
+            {'type': 'text', 'text': 'working'},
+          ],
+          'usage': {'output': 50, 'input': 10},
+          'duration': 5000,
+          'timestamp': 100,
+        },
+      });
+      hub.current.frame(4, {'type': 'agent_end'}); // clock: 6600
+
+      final stats = container.read(sessionControllerProvider('abc')).turnStats;
+      expect(stats, isNotNull);
+      expect(stats!.ttftMs, 600);
+      expect(stats.tokensPerSec, closeTo(10.0, 0.001),
+          reason: '50 output tokens over a 5 s stream');
+      expect(stats.lastEventSeq, 4);
+    });
+
+    test('no tokens per second when the turn reported no usage', () async {
+      final gateway = FakeGateway(infoJson: infoJson());
+      final hub = SocketHub();
+      final container = makeContainer(gateway: gateway, hub: hub);
+      final sub = container.listen(
+          sessionControllerProvider('abc'), (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
+
+      hub.current.frame(1, {'type': 'agent_start'});
+      hub.current.frame(2, {
+        'type': 'message_update',
+        'message': {
+          'role': 'assistant',
+          'content': [
+            {'type': 'text', 'text': 'hi'},
+          ],
+          'timestamp': 100,
+        },
+      });
+      hub.current.frame(3, {'type': 'agent_end'});
+      final stats = container.read(sessionControllerProvider('abc')).turnStats;
+      expect(stats, isNotNull);
+      expect(stats!.tokensPerSec, isNull);
+      expect(stats.ttftMs, isNotNull);
+    });
+
+    test('stream reconnects are counted from live to down and land in state',
+        () async {
+      final gateway = FakeGateway(infoJson: infoJson());
+      final hub = SocketHub();
+      final scheduler = FakeScheduler();
+      final container = makeContainer(
+          gateway: gateway, hub: hub, scheduler: scheduler);
+      final sub = container.listen(
+          sessionControllerProvider('abc'), (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
+
+      // Live (the fake socket only turns live after auth_ok):
+      hub.current.authOk();
+      await pumpEventQueue();
+      hub.current.frame(1, {'type': 'agent_start'});
+      await pumpEventQueue();
+      expect(container.read(sessionControllerProvider('abc')).streamReconnects, 0);
+
+      // The server drops the connection: the stream reports a retry state.
+      hub.current.serverClose(1006, 'abnormal');
+      await pumpEventQueue();
+      await pumpEventQueue();
+      expect(
+          container.read(sessionControllerProvider('abc')).streamReconnects,
+          greaterThanOrEqualTo(1),
+          reason: 'a dropped live socket counts as one reconnect');
+    });
+
+    test('the plan derives from the /state poll', () async {
+      final gateway = FakeGateway(infoJson: infoJson());
+      gateway.stateBody = {
+        'queuedMessageCount': 0,
+        'todoPhases': [
+          {
+            'name': 'Tasks',
+            'tasks': [
+              {'content': 'Done thing', 'status': 'completed'},
+              {
+                'content': 'Blocked thing',
+                'status': 'blocked',
+                'blocker': 'Waiting on review',
+              },
+            ],
+          },
+        ],
+      };
+      final hub = SocketHub();
+      final container = makeContainer(gateway: gateway, hub: hub);
+      final sub = container.listen(
+          sessionControllerProvider('abc'), (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
+      await pumpEventQueue();
+
+      final s = container.read(sessionControllerProvider('abc'));
+      expect(s.planPhases, hasLength(1));
+      expect(s.planPhases[0].tasks.map((t) => t.status).toList(),
+          ['completed', 'blocked']);
     });
   });
 }

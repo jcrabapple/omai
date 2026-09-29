@@ -24,8 +24,16 @@ class TranscriptItemCallbacks {
   /// True while that retry is in flight: the Retry button disables.
   final bool retryingSend;
 
-  const TranscriptItemCallbacks(
-      {this.onLinkTap, this.onInspect, this.onRetrySend, this.retryingSend = false});
+  /// Retry the last agent turn (assistant messages, idle sessions only).
+  final VoidCallback? onRetryTurn;
+
+  const TranscriptItemCallbacks({
+    this.onLinkTap,
+    this.onInspect,
+    this.onRetrySend,
+    this.retryingSend = false,
+    this.onRetryTurn,
+  });
 }
 
 class TranscriptItemView extends StatelessWidget {
@@ -49,10 +57,18 @@ class TranscriptItemView extends StatelessWidget {
     final it = item;
     if (it is UserItem) {
       return UserBubble(
-          item: it, onRetry: callbacks.onRetrySend, retrying: callbacks.retryingSend);
+          item: it,
+          onRetry: callbacks.onRetrySend,
+          retrying: callbacks.retryingSend,
+          onInspect: callbacks.onInspect);
     }
     if (it is AssistantItem) {
-      return AssistantMessage(item: it, onLinkTap: callbacks.onLinkTap);
+      return AssistantMessage(
+        item: it,
+        onLinkTap: callbacks.onLinkTap,
+        onInspect: callbacks.onInspect,
+        onRetry: callbacks.onRetryTurn,
+      );
     }
     if (it is ThinkingItem) return ThinkingRow(item: it);
     if (it is ToolItem) {

@@ -17,6 +17,33 @@ Versions pinned exactly in `pubspec.yaml`.
 | `mocktail` (dev) | Mocks for notifier and client tests. |
 | `fake_async` (dev) | Virtual time for polling and timer tests. Already in the graph via `flutter_test`; declared directly so the import is lint-clean. |
 
+### Android-native (Task F): no new packages, deliberately
+
+The foreground service, notifications, share intent, shortcuts and adaptive
+icon are all plain Kotlin + manifest declarations (`KeepaliveService.kt`,
+`KeepaliveActionReceiver.kt`, `MainActivity.kt`), behind one MethodChannel
+(`us.snakepit.ohmypi/native`) and the Dart-side `KeepaliveSurface` interface
+(`lib/native/`). Evaluated alternatives, both rejected to keep the dependency
+graph unchanged:
+
+- `flutter_foreground_task`: one plugin cannot also post the separate
+  high-priority approval notifications the plan needs, its TaskHandler
+  documentation has changed isolation semantics across major versions
+  (v6-v10), and the service is a process keep-alive only, about 150 lines of
+  boring Kotlin we fully own.
+- `flutter_local_notifications`: would add a plugin (plus its manifest
+  merge) for posting and action-routing the service/channel code above
+  already does.
+
+Foreground-service type is `dataSync`: the service exists so a live session
+stream (a running agent turn) keeps flowing in the background, which is the
+textbook data-sync case. `remoteMessaging` is for chat apps replying to
+notifications; `specialUse` requires a Play-policy justification for
+something no listed type covers. The Android 15 6h/day `dataSync` budget is
+not a practical limit: the service only runs while a turn is active and is
+stopped when the turn ends, the user taps Stop, or the app returns to the
+foreground.
+
 ## Layout
 
 - `lib/app/` — `MaterialApp` wiring: theme mode (system light = paper, dark =

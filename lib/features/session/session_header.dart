@@ -16,6 +16,7 @@ import '../../stream/session_stream.dart' show StreamState, StreamStatus;
 import '../../theme/tokens.dart';
 import 'context_meter.dart';
 import 'session_actions.dart';
+import 'session_info_sheet.dart';
 
 class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
   const SessionHeader({
@@ -57,7 +58,16 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
       leading: const BackButton(),
       actions: [SessionActions(gwId: gwId)],
       titleSpacing: 0,
-      title: Column(
+      // Tapping the title opens the session info sheet.
+      title: Semantics(
+        label: 'Session info',
+        button: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => showSessionInfoSheet(context, gwId: gwId),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
+            child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -106,7 +116,10 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
               ],
             ),
           ),
-        ],
+              ],
+            ),
+          ),
+        ),
       ),
       bottom: hasActivity && state.activity != null
           ? PreferredSize(

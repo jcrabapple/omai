@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Task F: notification Stop button and launcher shortcut labels. -->
+    <string name="keepalive_stop">Stop</string>
+    <string name="shortcut_new_session">New session</string>
+    <string name="shortcut_new_session_long">New session</string>
+    <string name="shortcut_needs_you">Needs you</string>
+    <string name="shortcut_needs_you_long">Sessions that need you</string>
+</resources>

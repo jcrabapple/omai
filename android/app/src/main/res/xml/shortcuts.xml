@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Task F: static launcher shortcuts. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_session"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_pi"
+        android:shortcutShortLabel="@string/shortcut_new_session"
+        android:shortcutLongLabel="@string/shortcut_new_session_long">
+        <intent
+            android:action="us.snakepit.ohmypi.action.SHORTCUT"
+            android:targetPackage="us.snakepit.ohmypi"
+            android:targetClass="us.snakepit.ohmypi.MainActivity">
+            <extra android:name="route" android:value="new_session"/>
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="needs_you"
+        android:enabled="true"
+        android:icon="@drawable/ic_stat_pi"
+        android:shortcutShortLabel="@string/shortcut_needs_you"
+        android:shortcutLongLabel="@string/shortcut_needs_you_long">
+        <intent
+            android:action="us.snakepit.ohmypi.action.SHORTCUT"
+            android:targetPackage="us.snakepit.ohmypi"
+            android:targetClass="us.snakepit.ohmypi.MainActivity">
+            <extra android:name="route" android:value="needs_you"/>
+        </intent>
+    </shortcut>
+</shortcuts>

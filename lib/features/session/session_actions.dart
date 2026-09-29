@@ -9,6 +9,7 @@ import '../../state/reviewed_store.dart';
 import '../../state/session_controller.dart';
 import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
+import 'changes_page.dart';
 
 class SessionActions extends ConsumerStatefulWidget {
   const SessionActions({super.key, required this.gwId});
@@ -21,6 +22,14 @@ class SessionActions extends ConsumerStatefulWidget {
 
 class _SessionActionsState extends ConsumerState<SessionActions> {
   bool _stopping = false;
+
+  void _changes() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => ChangesPage(gwId: widget.gwId),
+      ),
+    );
+  }
 
   Future<void> _rename() async {
     final controller = TextEditingController(
@@ -155,6 +164,8 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
           : Icon(Icons.more_vert, color: tokens.ink),
       onSelected: (v) {
         switch (v) {
+          case 'changes':
+            _changes();
           case 'rename':
             _rename();
           case 'compact':
@@ -166,6 +177,7 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
         }
       },
       itemBuilder: (context) => [
+        const PopupMenuItem(value: 'changes', child: Text('Changes')),
         const PopupMenuItem(value: 'rename', child: Text('Rename')),
         const PopupMenuItem(value: 'compact', child: Text('Compact')),
         if (!done)

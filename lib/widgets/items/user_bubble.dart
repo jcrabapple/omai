@@ -22,8 +22,16 @@ class UserBubble extends StatelessWidget {
   /// True while the retry is in flight: the button disables (no double-send).
   final bool retrying;
 
-  const UserBubble(
-      {super.key, required this.item, this.onRetry, this.retrying = false});
+  /// Raw-JSON inspector for this message.
+  final void Function(Object? raw)? onInspect;
+
+  const UserBubble({
+    super.key,
+    required this.item,
+    this.onRetry,
+    this.retrying = false,
+    this.onInspect,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -99,6 +107,7 @@ class UserBubble extends StatelessWidget {
                     text: item.text,
                     raw: item.raw,
                     label: 'Your message',
+                    onInspect: onInspect,
                     child: bubble,
                   ),
                 ),

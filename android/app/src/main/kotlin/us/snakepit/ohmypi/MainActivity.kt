@@ -1,5 +1,268 @@
 package us.snakepit.ohmypi
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity()
+/**
+ * Task F: the single app MethodChannel. Everything native the app does lives
+ * here or in [KeepaliveService]: foreground-service keep-alive, approval
+ * notifications, POST_NOTIFICATIONS runtime request, share intent and
+ * launcher shortcuts routing.
+ */
+class MainActivity : FlutterActivity() {
+
+    companion object {
+        const val CHANNEL_NAME = "us.snakepit.ohmypi/native"
+
+        const val ACTION_SHORTCUT = "us.snakepit.ohmypi.action.SHORTCUT"
+        const val EXTRA_ROUTE = "route"
+        const val EXTRA_GW_ID = "gwId"
+        const val EXTRA_REQUEST_ID = "requestId"
+        const val EXTRA_ACTION = "action"
+
+        const val PERMISSION_REQUEST_CODE = 4242
+
+        @Volatile var dartChannel: MethodChannel? = null
+        @Volatile private var permissionReply: ((Boolean) -> Unit)? = null
+
+        /** Cold-start intent, consumed once by the Dart side. */
+        @Volatile var pendingLaunchPayload: Map<String, Any?>? = null
+
+        fun createNotificationChannels(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val manager =
+                context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    KeepaliveService.CHANNEL_RUNNING,
+                    "Running sessions",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Shown while a session's turn runs in the background"
+                    setShowBadge(false)
+                },
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    KeepaliveService.CHANNEL_APPROVALS,
+                    "Needs you",
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = "Sessions waiting on an approval"
+                },
+            )
+        }
+    }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        val channel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            CHANNEL_NAME,
+        )
+        dartChannel = channel
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "requestNotificationPermission" -> {
+                    // reply=false means the async runtime dialog decides.
+                    val async = requestNotificationPermission { granted ->
+                        result.success(granted)
+                    }
+                    if (async) result.success(true)
+                }
+                "startKeepalive" -> startKeepalive(call.arguments as? Map<*, *>)
+                "updateKeepalive" -> updateKeepalive(call.arguments as? Map<*, *>)
+                "stopKeepalive" -> stopKeepalive()
+                "showApproval" -> showApproval(call.arguments as? Map<*, *>)
+                "cancelApproval" -> cancelApproval(call.arguments as? Map<*, *>)
+                "getInitialIntent" -> {
+                    val payload = pendingLaunchPayload
+                    pendingLaunchPayload = null
+                    result.success(payload)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        dartChannel = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    // ------------------------------------------------------------ lifecycle
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        createNotificationChannels(this)
+        intentToPayload(intent)?.let { pendingLaunchPayload = it }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val payload = intentToPayload(intent) ?: return
+        // Warm start: straight to Dart. The engine is alive, the channel works.
+        dartChannel?.invokeMethod("intent", payload)
+    }
+
+    /** Maps a launch intent to the Dart routing payload; null when not ours. */
+    private fun intentToPayload(intent: Intent?): Map<String, Any?>? {
+        if (intent == null) return null
+        val gwId = intent.getStringExtra(EXTRA_GW_ID)
+        if (gwId != null) {
+            // Notification tap: open the app on that session.
+            return mapOf("type" to "openSession", "gwId" to gwId)
+        }
+        val shared = intent.getStringExtra(Intent.EXTRA_TEXT)
+        if (intent.action == Intent.ACTION_SEND &&
+            intent.type == "text/plain" &&
+            !shared.isNullOrBlank()
+        ) {
+            return mapOf("type" to "newSession", "prompt" to shared)
+        }
+        if (intent.action == ACTION_SHORTCUT) {
+            return when (intent.getStringExtra(EXTRA_ROUTE)) {
+                "new_session" -> mapOf("type" to "newSession")
+                "needs_you" -> mapOf("type" to "needsYou")
+                else -> null
+            }
+        }
+        return null
+    }
+
+    // ----------------------------------------------------------- Dart calls
+
+    private fun requestNotificationPermission(reply: (Boolean) -> Unit): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            reply(true)
+            return true
+        }
+        if (ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            reply(true)
+            return true
+        }
+        permissionReply = reply
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            PERMISSION_REQUEST_CODE,
+        )
+        return false // the real answer arrives via onRequestPermissionsResult
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != PERMISSION_REQUEST_CODE) return
+        val granted = grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        permissionReply?.invoke(granted)
+        permissionReply = null
+    }
+
+    private fun startKeepalive(args: Map<*, *>?) {
+        if (args == null) return
+        ContextCompat.startForegroundService(this, KeepaliveService.intent(this, args))
+    }
+
+    private fun updateKeepalive(args: Map<*, *>?) {
+        if (args == null) return
+        val running = KeepaliveService.instance
+        if (running != null) {
+            running.updateNotification(args)
+        } else {
+            ContextCompat.startForegroundService(this, KeepaliveService.intent(this, args))
+        }
+    }
+
+    private fun stopKeepalive() {
+        KeepaliveService.instance?.stopSelf()
+    }
+
+    private fun showApproval(args: Map<*, *>?) {
+        if (args == null) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        createNotificationChannels(this)
+        val requestId = args["requestId"] as? String ?: return
+        val gwId = args["gwId"] as? String ?: return
+        val actions = (args["actions"] as? List<*>) ?: emptyList<Any?>()
+
+        val open = PendingIntent.getActivity(
+            this,
+            requestId.hashCode(),
+            Intent(this, MainActivity::class.java)
+                .putExtra(EXTRA_GW_ID, gwId)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val builder = NotificationCompat.Builder(this, KeepaliveService.CHANNEL_APPROVALS)
+            .setSmallIcon(R.drawable.ic_stat_pi)
+            .setContentTitle(args["title"] as? String ?: "Needs your approval")
+            .setContentText(args["body"] as? String ?: "")
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(args["body"] as? String ?: ""),
+            )
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+
+        for ((index, raw) in actions.withIndex()) {
+            val map = raw as? Map<*, *> ?: continue
+            val actionId = map["id"] as? String ?: continue
+            val label = map["label"] as? String ?: continue
+            val intent = Intent(this, KeepaliveActionReceiver::class.java)
+                .setAction(KeepaliveActionReceiver.ACTION_APPROVAL)
+                .setPackage(packageName)
+                .putExtra(EXTRA_GW_ID, gwId)
+                .putExtra(EXTRA_REQUEST_ID, requestId)
+                .putExtra(EXTRA_ACTION, actionId)
+            val pi = PendingIntent.getBroadcast(
+                this,
+                (requestId + actionId).hashCode() + index,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(NotificationCompat.Action(0, label, pi))
+        }
+
+        try {
+            NotificationManagerCompat.from(this)
+                .notify(requestId.hashCode(), builder.build())
+        } catch (_: SecurityException) {
+            // Permission dropped between check and post; the app UI still works.
+        }
+    }
+
+    private fun cancelApproval(args: Map<*, *>?) {
+        val requestId = args?.get("requestId") as? String ?: return
+        NotificationManagerCompat.from(this).cancel(requestId.hashCode())
+    }
+}

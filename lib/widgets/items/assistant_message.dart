@@ -54,6 +54,12 @@ class AssistantMessage extends StatefulWidget {
   /// Called when the user taps a link. v1 opens nothing (TODO: in-app viewer).
   final void Function(String href)? onLinkTap;
 
+  /// Raw-JSON inspector for this message.
+  final void Function(Object? raw)? onInspect;
+
+  /// Retry the last turn; null (e.g. while a turn runs) hides the action.
+  final VoidCallback? onRetry;
+
   /// Test seam: the clock used for the streaming render throttle.
   final DateTime Function()? clockNow;
 
@@ -61,6 +67,8 @@ class AssistantMessage extends StatefulWidget {
     super.key,
     required this.item,
     this.onLinkTap,
+    this.onInspect,
+    this.onRetry,
     this.clockNow,
   });
 
@@ -140,6 +148,8 @@ class _AssistantMessageState extends State<AssistantMessage> {
       raw: item.raw,
       disabled: item.streaming,
       label: 'Assistant message',
+      onInspect: widget.onInspect,
+      onRetry: widget.onRetry,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

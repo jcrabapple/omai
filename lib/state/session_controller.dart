@@ -22,7 +22,8 @@ import '../composer/slash.dart' show SlashCommand;
 import '../stream/scheduler.dart';
 import '../stream/session_stream.dart';
 import '../transcript/reducer.dart';
-import '../transcript/items.dart' show UserItem;
+import '../transcript/items.dart' show AssistantItem, UserItem;
+import '../transcript/plan.dart';
 import '../wire/wire.dart' show OmpEvent, UiRequest;
 import 'connection_notifier.dart';
 import 'reviewed_store.dart';
@@ -50,6 +51,42 @@ class ActivitySummary {
   int get hashCode => Object.hash(toolName, turnStartedAt);
 }
 
+/// Per-turn numbers for the info sheet's "Stats for nerds": the turn's
+/// time-to-first-token, tokens per second, and session-wide stream health.
+class TurnStats {
+  const TurnStats({
+    required this.ttftMs,
+    required this.tokensPerSec,
+    required this.reconnects,
+    required this.lastEventSeq,
+  });
+
+  /// agent_start to the first assistant delta of the last turn; null when
+  /// the turn produced no streamed assistant message.
+  final int? ttftMs;
+
+  /// Output tokens per second over the last turn's stream duration, from the
+  /// turn's usage when the model reported it; null when it did not.
+  final double? tokensPerSec;
+
+  /// Times the websocket dropped since the session opened.
+  final int reconnects;
+
+  /// Newest event sequence number we hold.
+  final int? lastEventSeq;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TurnStats &&
+      other.ttftMs == ttftMs &&
+      other.tokensPerSec == tokensPerSec &&
+      other.reconnects == reconnects &&
+      other.lastEventSeq == lastEventSeq;
+
+  @override
+  int get hashCode => Object.hash(ttftMs, tokensPerSec, reconnects, lastEventSeq);
+}
+
 /// Everything the session screen renders, one immutable snapshot.
 class SessionState {
   SessionState({
@@ -67,6 +104,9 @@ class SessionState {
     this.queued = 0,
     this.activity,
     this.retryingSends = const <String>{},
+    this.planPhases = const <TodoPhase>[],
+    this.streamReconnects = 0,
+    this.turnStats,
   }) : transcript = transcript ?? emptyTranscript();
 
   final String gwId;
@@ -101,6 +141,17 @@ class SessionState {
   /// disable itself and re-entry is visible in state.
   final Set<String> retryingSends;
 
+  /// The open session's omp task plan, from the /state poll. Empty when the
+  /// session has no plan.
+  final List<TodoPhase> planPhases;
+
+  /// Times the websocket dropped since the session opened (live to
+  /// connecting/retrying/offline transitions).
+  final int streamReconnects;
+
+  /// Timing of the last finished turn, for "Stats for nerds".
+  final TurnStats? turnStats;
+
   /// Blocking dialogs omp is waiting on (for the approval takeover UI).
   List<UiRequest> get pendingUi => transcript.pendingUi;
 
@@ -123,6 +174,10 @@ class SessionState {
     ActivitySummary? activity,
     bool clearActivity = false,
     Set<String>? retryingSends,
+    List<TodoPhase>? planPhases,
+    int? streamReconnects,
+    TurnStats? turnStats,
+    bool clearTurnStats = false,
   }) {
     return SessionState(
       gwId: gwId,
@@ -138,6 +193,9 @@ class SessionState {
       queued: queued ?? this.queued,
       activity: clearActivity ? null : (activity ?? this.activity),
       retryingSends: retryingSends ?? this.retryingSends,
+      planPhases: planPhases ?? this.planPhases,
+      streamReconnects: streamReconnects ?? this.streamReconnects,
+      turnStats: clearTurnStats ? null : (turnStats ?? this.turnStats),
     );
   }
 }
@@ -154,6 +212,7 @@ class SessionEnv {
     required this.token,
     required this.socketFactory,
     required this.scheduler,
+    this.now = _systemNow,
   });
 
   final GatewayClient client;
@@ -161,6 +220,11 @@ class SessionEnv {
   final String token;
   final SocketFactory socketFactory;
   final Scheduler scheduler;
+
+  /// Injectable clock for turn timing (TTFT, tokens per second).
+  final DateTime Function() now;
+
+  static DateTime _systemNow() => DateTime.now();
 }
 
 /// Default environment for the active connection. Throws when not signed in.
@@ -203,6 +267,13 @@ class SessionController extends Notifier<SessionState> {
   // Pending, coalesced events (see [enqueue]).
   final List<({OmpEvent event, int at})> _pendingEvents = [];
   bool _flushScheduled = false;
+
+  // Turn timing (Stats for nerds), all driven by env.now.
+  int? _turnStartMs;
+  int? _ttftMs;
+
+  /// The last stream state we saw, for counting reconnects.
+  StreamState? _lastStreamState;
 
   @override
   SessionState build() {
@@ -289,9 +360,7 @@ class SessionController extends Notifier<SessionState> {
           if (gen == _generation) _onControl(frame);
         },
         onState: (status) {
-          if (gen == _generation) {
-            state = state.copyWith(connection: status);
-          }
+          if (gen == _generation) _onStreamState(status);
         },
         onResync: (_) => unawaited(_resync(env, gwId, gen)),
         onSignedOut: () {
@@ -310,6 +379,21 @@ class SessionController extends Notifier<SessionState> {
     );
     _stream = stream;
     stream.start();
+  }
+
+  /// Connection status: paint it, and count a reconnect each time a live
+  /// socket drops (live -> connecting/retrying/offline).
+  void _onStreamState(StreamStatus status) {
+    final was = _lastStreamState;
+    _lastStreamState = status.state;
+    if (was == StreamState.live && status.state != StreamState.live) {
+      state = state.copyWith(
+        connection: status,
+        streamReconnects: state.streamReconnects + 1,
+      );
+      return;
+    }
+    state = state.copyWith(connection: status);
   }
 
   void _onControl(Map<String, Object?> frame) {
@@ -353,6 +437,15 @@ class SessionController extends Notifier<SessionState> {
   /// deterministic without a frame clock.
   void _enqueue(OmpEvent event) {
     final at = DateTime.now().millisecondsSinceEpoch;
+    // TTFT is the wall time from agent_start to the FIRST assistant delta;
+    // it must be read at enqueue time, before coalescing can delay the
+    // delta's delivery past the next clock reading.
+    if (_turnStartMs != null &&
+        _ttftMs == null &&
+        event.type == 'message_update' &&
+        _isAssistantDelta(event)) {
+      _ttftMs = _now() - _turnStartMs!;
+    }
     final key = _coalesceKey(event);
     if (key != null) {
       if (_pendingEvents.isNotEmpty &&
@@ -390,9 +483,19 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  /// Injectable clock for turn timing, in epoch ms; the wall clock until the
+  /// env has loaded (which is before any event can arrive anyway).
+  int _now() {
+    final env = ref.read(sessionEnvProvider).value;
+    final clock = env?.now;
+    return (clock == null ? DateTime.now() : clock()).millisecondsSinceEpoch;
+  }
+
   void _afterEvent(OmpEvent event) {
     switch (event.type) {
       case 'agent_start':
+        _turnStartMs = _now();
+        _ttftMs = null;
         state = state.copyWith(
           activity: ActivitySummary(
             toolName: state.activity?.toolName ?? '',
@@ -402,7 +505,10 @@ class SessionController extends Notifier<SessionState> {
       case 'agent_end':
         // The turn is over: the activity line goes, stats refresh. The
         // reducer has already cleared `running`.
-        state = state.copyWith(clearActivity: true);
+        state = state.copyWith(
+          clearActivity: true,
+          turnStats: _turnStatsForLastTurn(),
+        );
         _scheduleStats();
       case 'tool_execution_start':
         final name = event.toolName ?? '';
@@ -450,6 +556,44 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  /// True while a message_update carries an assistant message payload (the
+  /// first one after agent_start defines the turn's TTFT).
+  bool _isAssistantDelta(OmpEvent event) {
+    final m = event.raw['message'];
+    return m is Map && m['role'] == 'assistant';
+  }
+
+  /// Timing of the turn that just ended: TTFT as timed from agent_start to
+  /// the first assistant delta, tokens per second from the last assistant
+  /// message's usage and stream duration when both are present.
+  TurnStats _turnStatsForLastTurn() {
+    AssistantItem? last;
+    for (final it in state.transcript.items) {
+      if (it is AssistantItem) last = it;
+    }
+    int? ttft = _ttftMs ?? last?.ttft;
+    double? tokensPerSec;
+    final output = last?.usage?['output'];
+    if (output is num && output > 0) {
+      var durationMs = last?.duration;
+      if ((durationMs == null || durationMs <= 0) &&
+          _turnStartMs != null &&
+          last?.timestamp != null) {
+        durationMs = last!.timestamp! - _turnStartMs!;
+      }
+      if (durationMs != null && durationMs > 0) {
+        tokensPerSec = output.toDouble() * 1000 / durationMs;
+      }
+    }
+    if (ttft != null && ttft < 0) ttft = 0;
+    return TurnStats(
+      ttftMs: ttft,
+      tokensPerSec: tokensPerSec,
+      reconnects: state.streamReconnects,
+      lastEventSeq: streamLastSeq ?? state.info?.lastEventSeq,
+    );
+  }
+
   // ------------------------------------------------------- info refreshers
 
   Future<void> _refreshInfo(
@@ -483,9 +627,13 @@ class SessionController extends Notifier<SessionState> {
       if (gen != _generation || !ref.mounted) return;
       final queued = st['queuedMessageCount'];
       state = state.copyWith(queued: queued is num ? queued.toInt() : 0);
+      // The plan rides the same /state payload (web: plan store derives from
+      // active.state.todoPhases, refreshed by the state poll).
+      final phases = normalizePhases(st['todoPhases']);
+      state = state.copyWith(planPhases: phases);
       ref
           .read(sessionsStoreProvider.notifier)
-          .setTodoActive(gwId, _hasActiveTodo(st));
+          .setTodoActive(gwId, hasActiveTodo(phases));
     } catch (_) {
       // the count is a courtesy
     }
@@ -738,21 +886,4 @@ String? _coalesceKey(OmpEvent event) {
     default:
       return null;
   }
-}
-
-/// True when some todo task is in_progress: the session is working even
-/// between agent turns. Ported from web/src/lib/state/plan.ts hasActiveTodo,
-/// reading a raw /state payload.
-bool _hasActiveTodo(Map<String, dynamic> stateJson) {
-  final phases = stateJson['todoPhases'];
-  if (phases is! List) return false;
-  for (final phase in phases) {
-    if (phase is! Map) continue;
-    final tasks = phase['tasks'];
-    if (tasks is! List) continue;
-    for (final task in tasks) {
-      if (task is Map && task['status'] == 'in_progress') return true;
-    }
-  }
-  return false;
 }
