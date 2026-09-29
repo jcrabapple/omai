@@ -13,6 +13,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -77,18 +78,15 @@ class MainActivity : FlutterActivity() {
         dartChannel = channel
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
-                "requestNotificationPermission" -> {
-                    // reply=false means the async runtime dialog decides.
-                    val async = requestNotificationPermission { granted ->
-                        result.success(granted)
-                    }
-                    if (async) result.success(true)
-                }
-                "startKeepalive" -> startKeepalive(call.arguments as? Map<*, *>)
-                "updateKeepalive" -> updateKeepalive(call.arguments as? Map<*, *>)
-                "stopKeepalive" -> stopKeepalive()
-                "showApproval" -> showApproval(call.arguments as? Map<*, *>)
-                "cancelApproval" -> cancelApproval(call.arguments as? Map<*, *>)
+                // Every branch replies exactly once: a MethodChannel call
+                // that never replies leaves the Dart await hanging forever.
+                "requestNotificationPermission" ->
+                    requestNotificationPermission { granted -> result.success(granted) }
+                "startKeepalive" -> result.success(startKeepalive(call.arguments as? Map<*, *>))
+                "updateKeepalive" -> result.success(updateKeepalive(call.arguments as? Map<*, *>))
+                "stopKeepalive" -> { stopKeepalive(); result.success(null) }
+                "showApproval" -> { showApproval(call.arguments as? Map<*, *>); result.success(null) }
+                "cancelApproval" -> { cancelApproval(call.arguments as? Map<*, *>); result.success(null) }
                 "getInitialIntent" -> {
                     val payload = pendingLaunchPayload
                     pendingLaunchPayload = null
@@ -146,25 +144,34 @@ class MainActivity : FlutterActivity() {
 
     // ----------------------------------------------------------- Dart calls
 
-    private fun requestNotificationPermission(reply: (Boolean) -> Unit): Boolean {
+    /**
+     * Replies exactly once. Prompts only while this activity is resumed (a
+     * runtime dialog can't be shown from the background); from the
+     * background it just reports the current grant.
+     */
+    private fun requestNotificationPermission(reply: (Boolean) -> Unit) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             reply(true)
-            return true
+            return
         }
         if (ContextCompat.checkSelfPermission(
                 this, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
         ) {
             reply(true)
-            return true
+            return
         }
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            reply(false)
+            return
+        }
+        permissionReply?.invoke(false) // a superseded request must not hang
         permissionReply = reply
         ActivityCompat.requestPermissions(
             this,
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
             PERMISSION_REQUEST_CODE,
         )
-        return false // the real answer arrives via onRequestPermissionsResult
     }
 
     override fun onRequestPermissionsResult(
@@ -180,19 +187,29 @@ class MainActivity : FlutterActivity() {
         permissionReply = null
     }
 
-    private fun startKeepalive(args: Map<*, *>?) {
-        if (args == null) return
-        ContextCompat.startForegroundService(this, KeepaliveService.intent(this, args))
+    /**
+     * False when Android refuses the foreground-service start (background
+     * start restrictions, API 31+) so Dart falls back to the plain pause
+     * instead of believing the socket is being kept alive.
+     */
+    private fun startKeepalive(args: Map<*, *>?): Boolean {
+        if (args == null) return false
+        return try {
+            ContextCompat.startForegroundService(this, KeepaliveService.intent(this, args))
+            true
+        } catch (e: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException (API 31+) extends it.
+            false
+        } catch (e: SecurityException) {
+            false
+        }
     }
 
-    private fun updateKeepalive(args: Map<*, *>?) {
-        if (args == null) return
-        val running = KeepaliveService.instance
-        if (running != null) {
-            running.updateNotification(args)
-        } else {
-            ContextCompat.startForegroundService(this, KeepaliveService.intent(this, args))
-        }
+    private fun updateKeepalive(args: Map<*, *>?): Boolean {
+        if (args == null) return false
+        val running = KeepaliveService.instance ?: return false
+        running.updateNotification(args)
+        return true
     }
 
     private fun stopKeepalive() {

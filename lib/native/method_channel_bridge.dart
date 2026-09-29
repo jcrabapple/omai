@@ -8,8 +8,9 @@ import 'keepalive.dart';
 class MethodChannelKeepaliveSurface implements KeepaliveSurface {
   const MethodChannelKeepaliveSurface();
 
-  static const MethodChannel channel =
-      MethodChannel('us.snakepit.ohmypi/native');
+  static const MethodChannel channel = MethodChannel(
+    'us.snakepit.ohmypi/native',
+  );
 
   @override
   Future<bool> ensureNotificationPermission() async {
@@ -22,17 +23,22 @@ class MethodChannelKeepaliveSurface implements KeepaliveSurface {
   }
 
   @override
-  Future<void> showRunning({
+  Future<bool> showRunning({
     required String gwId,
     required String sessionTitle,
     String? tool,
     required int startedAt,
   }) async {
-    await channel.invokeMethod('startKeepalive', <String, Object?>{
-      'gwId': gwId,
-      'title': runningNotificationTitle(sessionTitle),
-      'text': runningNotificationText(tool, startedAt, DateTime.now()),
-    });
+    try {
+      final r = await channel.invokeMethod('startKeepalive', <String, Object?>{
+        'gwId': gwId,
+        'title': runningNotificationTitle(sessionTitle),
+        'text': runningNotificationText(tool, startedAt, DateTime.now()),
+      });
+      return r == true;
+    } on PlatformException {
+      return false;
+    }
   }
 
   @override
@@ -66,14 +72,16 @@ class MethodChannelKeepaliveSurface implements KeepaliveSurface {
       'title': title,
       'body': body,
       'actions': [
-        for (final a in actions) <String, Object?>{'id': a.id, 'label': a.label},
+        for (final a in actions)
+          <String, Object?>{'id': a.id, 'label': a.label},
       ],
     });
   }
 
   @override
   Future<void> cancelApproval(String requestId) {
-    return channel
-        .invokeMethod('cancelApproval', <String, Object?>{'requestId': requestId});
+    return channel.invokeMethod('cancelApproval', <String, Object?>{
+      'requestId': requestId,
+    });
   }
 }

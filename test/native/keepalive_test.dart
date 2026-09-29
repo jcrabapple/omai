@@ -13,18 +13,28 @@ class RecordedCall {
 }
 
 class FakeSurface implements KeepaliveSurface {
-  FakeSurface({this.permissionGranted = true});
+  FakeSurface({this.permissionGranted = true, this.startAllowed = true});
 
   bool permissionGranted;
+
+  /// False simulates Android refusing the foreground-service start.
+  bool startAllowed;
   final List<RecordedCall> calls = [];
 
-  List<RecordedCall> get running => _filter(const ['showRunning', 'updateRunning', 'stopRunning']);
-  List<RecordedCall> get approvals => _filter(const ['showApproval', 'cancelApproval']);
+  List<RecordedCall> get running =>
+      _filter(const ['showRunning', 'updateRunning', 'stopRunning']);
+  List<RecordedCall> get approvals =>
+      _filter(const ['showApproval', 'cancelApproval']);
 
-  List<RecordedCall> _filter(List<String> ops) =>
-      [for (final c in calls) if (ops.contains(c.op)) c];
+  List<RecordedCall> _filter(List<String> ops) => [
+    for (final c in calls)
+      if (ops.contains(c.op)) c,
+  ];
 
-  int count(String op) => [for (final c in calls) if (c.op == op) c].length;
+  int count(String op) => [
+    for (final c in calls)
+      if (c.op == op) c,
+  ].length;
 
   @override
   Future<bool> ensureNotificationPermission() async {
@@ -33,17 +43,20 @@ class FakeSurface implements KeepaliveSurface {
   }
 
   @override
-  Future<void> showRunning({
+  Future<bool> showRunning({
     required String gwId,
     required String sessionTitle,
     String? tool,
     required int startedAt,
   }) async {
-    calls.add(RecordedCall('showRunning', {
-      'gwId': gwId,
-      'title': runningNotificationTitle(sessionTitle),
-      'text': runningNotificationText(tool, startedAt, now()),
-    }));
+    calls.add(
+      RecordedCall('showRunning', {
+        'gwId': gwId,
+        'title': runningNotificationTitle(sessionTitle),
+        'text': runningNotificationText(tool, startedAt, now()),
+      }),
+    );
+    return startAllowed;
   }
 
   @override
@@ -52,10 +65,12 @@ class FakeSurface implements KeepaliveSurface {
     String? tool,
     required int startedAt,
   }) async {
-    calls.add(RecordedCall('updateRunning', {
-      'title': runningNotificationTitle(sessionTitle),
-      'text': runningNotificationText(tool, startedAt, now()),
-    }));
+    calls.add(
+      RecordedCall('updateRunning', {
+        'title': runningNotificationTitle(sessionTitle),
+        'text': runningNotificationText(tool, startedAt, now()),
+      }),
+    );
   }
 
   @override
@@ -71,12 +86,14 @@ class FakeSurface implements KeepaliveSurface {
     required String body,
     required List<NotificationAction> actions,
   }) async {
-    calls.add(RecordedCall('showApproval', {
-      'requestId': requestId,
-      'title': title,
-      'body': body,
-      'actions': [for (final a in actions) '${a.id}:${a.label}'],
-    }));
+    calls.add(
+      RecordedCall('showApproval', {
+        'requestId': requestId,
+        'title': title,
+        'body': body,
+        'actions': [for (final a in actions) '${a.id}:${a.label}'],
+      }),
+    );
   }
 
   @override
@@ -104,8 +121,11 @@ KeepaliveSnapshot snapshot({
 }
 
 class Harness {
-  Harness({bool permission = true}) {
-    surface = FakeSurface(permissionGranted: permission);
+  Harness({bool permission = true, bool startAllowed = true}) {
+    surface = FakeSurface(
+      permissionGranted: permission,
+      startAllowed: startAllowed,
+    );
     final pauses = <int>[];
     coordinator = KeepaliveCoordinator(
       surface: surface,
@@ -128,24 +148,33 @@ class Harness {
   UiAnswer? answer(String requestId) => answers[requestId];
 }
 
-UiRequest confirmReq(String id) =>
-    UiRequest({'id': id, 'method': 'confirm', 'title': 'Run command\ngit push'});
+UiRequest confirmReq(String id) => UiRequest({
+  'id': id,
+  'method': 'confirm',
+  'title': 'Run command\ngit push',
+});
 
-UiRequest selectReq(String id, List<Object?> options) =>
-    UiRequest({'id': id, 'method': 'select', 'title': 'Pick one', 'options': options});
+UiRequest selectReq(String id, List<Object?> options) => UiRequest({
+  'id': id,
+  'method': 'select',
+  'title': 'Pick one',
+  'options': options,
+});
 
 void main() {
   group('keepalive policy', () {
-    test('background while running: service starts, controller is NOT paused',
-        () async {
-      final h = Harness();
-      h.coordinator.update(snapshot(running: true, tool: 'bash'));
-      await h.coordinator.appBackgrounded();
-      expect(h.surface.count('showRunning'), 1);
-      expect(h.pauses, isEmpty);
-      expect(h.coordinator.serviceActive, isTrue);
-      expect(h.surface.running.first.args['title'], 'Running: fix the bug');
-    });
+    test(
+      'background while running: service starts, controller is NOT paused',
+      () async {
+        final h = Harness();
+        h.coordinator.update(snapshot(running: true, tool: 'bash'));
+        await h.coordinator.appBackgrounded();
+        expect(h.surface.count('showRunning'), 1);
+        expect(h.pauses, isEmpty);
+        expect(h.coordinator.serviceActive, isTrue);
+        expect(h.surface.running.first.args['title'], 'Running: fix the bug');
+      },
+    );
 
     test('background while idle: controller pauses, no service', () async {
       final h = Harness();
@@ -167,8 +196,7 @@ void main() {
       expect(h.coordinator.serviceActive, isFalse);
     });
 
-    test('returning to foreground stops the service without pausing',
-        () async {
+    test('returning to foreground stops the service without pausing', () async {
       final h = Harness();
       h.coordinator.update(snapshot(running: true));
       await h.coordinator.appBackgrounded();
@@ -178,16 +206,18 @@ void main() {
       expect(h.coordinator.serviceActive, isFalse);
     });
 
-    test('Stop on the notification aborts, stops the service and pauses',
-        () async {
-      final h = Harness();
-      h.coordinator.update(snapshot(running: true));
-      await h.coordinator.appBackgrounded();
-      await h.coordinator.stopPressed();
-      expect(h.stops, 1);
-      expect(h.surface.count('stopRunning'), 1);
-      expect(h.pauses, hasLength(1));
-    });
+    test(
+      'Stop on the notification aborts, stops the service and pauses',
+      () async {
+        final h = Harness();
+        h.coordinator.update(snapshot(running: true));
+        await h.coordinator.appBackgrounded();
+        await h.coordinator.stopPressed();
+        expect(h.stops, 1);
+        expect(h.surface.count('stopRunning'), 1);
+        expect(h.pauses, hasLength(1));
+      },
+    );
 
     test('tool change while running updates the running text', () async {
       final h = Harness();
@@ -202,15 +232,59 @@ void main() {
       expect(updates, hasLength(1));
     });
 
-    test('permission denied falls back to the plain background pause',
-        () async {
-      final h = Harness(permission: false);
-      h.coordinator.update(snapshot(running: true));
-      await h.coordinator.appBackgrounded();
-      expect(h.coordinator.serviceActive, isFalse);
-      expect(h.surface.running, isEmpty);
-      expect(h.pauses, hasLength(1));
-    });
+    test(
+      'Android refusing the service start falls back to the pause',
+      () async {
+        final h = Harness(startAllowed: false);
+        h.coordinator.update(snapshot(running: true, tool: 'bash'));
+        await h.coordinator.appBackgrounded();
+        expect(h.surface.count('showRunning'), 1);
+        expect(h.coordinator.serviceActive, isFalse);
+        expect(h.pauses, hasLength(1));
+      },
+    );
+
+    test(
+      'foreground during an in-flight start stops the service, no pause',
+      () async {
+        final h = Harness();
+        h.coordinator.update(snapshot(running: true));
+        final pending = h.coordinator.appBackgrounded();
+        await h.coordinator.appForegrounded();
+        await pending;
+        expect(h.coordinator.serviceActive, isFalse);
+        expect(h.surface.count('stopRunning'), 1);
+        expect(h.pauses, isEmpty);
+      },
+    );
+
+    test(
+      'system timeout (dataSync budget) pauses and clears approvals',
+      () async {
+        final h = Harness();
+        h.coordinator.update(
+          snapshot(running: true, pendingUi: [confirmReq('r1')]),
+        );
+        await h.coordinator.appBackgrounded();
+        expect(h.surface.count('showApproval'), 1);
+        await h.coordinator.systemStopped();
+        expect(h.coordinator.serviceActive, isFalse);
+        expect(h.surface.count('cancelApproval'), 1);
+        expect(h.pauses, hasLength(1));
+      },
+    );
+
+    test(
+      'permission denied falls back to the plain background pause',
+      () async {
+        final h = Harness(permission: false);
+        h.coordinator.update(snapshot(running: true));
+        await h.coordinator.appBackgrounded();
+        expect(h.coordinator.serviceActive, isFalse);
+        expect(h.surface.running, isEmpty);
+        expect(h.pauses, hasLength(1));
+      },
+    );
 
     test('foreground updates clear the service', () async {
       final h = Harness();
@@ -248,34 +322,45 @@ void main() {
       h.coordinator.update(snapshot(running: true));
       await h.coordinator.appBackgrounded();
       h.coordinator.update(
-          snapshot(running: true, pendingUi: [confirmReq('u1')]));
+        snapshot(running: true, pendingUi: [confirmReq('u1')]),
+      );
       await Future<void>.delayed(Duration.zero);
       h.coordinator.update(snapshot(running: true));
       await Future<void>.delayed(Duration.zero);
       expect(h.surface.count('cancelApproval'), 1);
     });
 
-    test('select with at most three options gets one action per option',
-        () async {
-      final h = Harness();
-      h.coordinator.update(snapshot(running: true));
-      await h.coordinator.appBackgrounded();
-      h.coordinator.update(snapshot(running: true, pendingUi: [
-        selectReq('u2', ['yes', 'no', 'maybe']),
-      ]));
-      await Future<void>.delayed(Duration.zero);
-      final call =
-          h.surface.approvals.where((c) => c.op == 'showApproval').single;
-      expect(call.args['actions'], ['opt:0:yes', 'opt:1:no', 'opt:2:maybe']);
-    });
+    test(
+      'select with at most three options gets one action per option',
+      () async {
+        final h = Harness();
+        h.coordinator.update(snapshot(running: true));
+        await h.coordinator.appBackgrounded();
+        h.coordinator.update(
+          snapshot(
+            running: true,
+            pendingUi: [
+              selectReq('u2', ['yes', 'no', 'maybe']),
+            ],
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+        final call = h.surface.approvals
+            .where((c) => c.op == 'showApproval')
+            .single;
+        expect(call.args['actions'], ['opt:0:yes', 'opt:1:no', 'opt:2:maybe']);
+      },
+    );
 
     test('input and editor requests post without actions', () async {
-      final actions = approvalActionsFor(UiRequest(
-          {'id': 'u3', 'method': 'input', 'title': 'Type something'}));
+      final actions = approvalActionsFor(
+        UiRequest({'id': 'u3', 'method': 'input', 'title': 'Type something'}),
+      );
       expect(actions, isEmpty);
       expect(
         approvalActionsFor(
-            UiRequest({'id': 'u4', 'method': 'editor', 'title': 'Edit'})),
+          UiRequest({'id': 'u4', 'method': 'editor', 'title': 'Edit'}),
+        ),
         isEmpty,
       );
     });
@@ -285,14 +370,14 @@ void main() {
       h.coordinator.update(snapshot(running: true));
       await h.coordinator.appBackgrounded();
       h.coordinator.update(
-          snapshot(running: true, pendingUi: [confirmReq('u1')]));
+        snapshot(running: true, pendingUi: [confirmReq('u1')]),
+      );
       await Future<void>.delayed(Duration.zero);
       await h.coordinator.approvalPressed('u1', 'approve');
       await h.coordinator.approvalPressed('u2', 'deny');
       expect(h.answer('u1')?.toMap(), {'confirmed': true});
       final req = confirmReq('u2');
-      h.coordinator.update(
-          snapshot(running: true, pendingUi: [req]));
+      h.coordinator.update(snapshot(running: true, pendingUi: [req]));
       await Future<void>.delayed(Duration.zero);
       await h.coordinator.approvalPressed('u2', 'deny');
       expect(h.answer('u2')?.toMap(), {'confirmed': false});
@@ -311,13 +396,17 @@ void main() {
       expect(h.surface.count('cancelApproval'), 1);
     });
 
-    test('no notifications are posted while the app is in the foreground',
-        () async {
-      final h = Harness();
-      h.coordinator.update(snapshot(running: true, pendingUi: [confirmReq('u1')]));
-      await Future<void>.delayed(Duration.zero);
-      expect(h.surface.approvals, isEmpty);
-    });
+    test(
+      'no notifications are posted while the app is in the foreground',
+      () async {
+        final h = Harness();
+        h.coordinator.update(
+          snapshot(running: true, pendingUi: [confirmReq('u1')]),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(h.surface.approvals, isEmpty);
+      },
+    );
   });
 
   group('notification content builders', () {

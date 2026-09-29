@@ -46,6 +46,8 @@ class KeepaliveService : Service() {
                 .putExtra("text", args["text"] as? String ?: "")
     }
 
+    private var lastGwId: String = ""
+
     override fun onCreate() {
         super.onCreate()
         MainActivity.createNotificationChannels(this)
@@ -58,6 +60,7 @@ class KeepaliveService : Service() {
             return START_NOT_STICKY
         }
         val gwId = intent?.getStringExtra(MainActivity.EXTRA_GW_ID) ?: ""
+        lastGwId = gwId
         val title = intent?.getStringExtra("title") ?: "Running"
         val text = intent?.getStringExtra("text") ?: ""
         startForegroundCompat(buildNotification(gwId, title, text))
@@ -119,6 +122,29 @@ class KeepaliveService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST
         }
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+    }
+
+    /**
+     * Android 15+: the dataSync budget (6h per 24h) ran out. Stop within the
+     * grace period and tell Dart, which pauses the controller like any other
+     * background.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        endedBySystem()
+    }
+
+    @Deprecated("API 35 overload; kept for API 34 devices")
+    override fun onTimeout(startId: Int) {
+        endedBySystem()
+    }
+
+    private fun endedBySystem() {
+        val gwId = lastGwId
+        stopSelf()
+        MainActivity.dartChannel?.invokeMethod(
+            "intent",
+            mapOf("type" to "keepaliveEnded", "gwId" to gwId),
+        )
     }
 
     override fun onDestroy() {

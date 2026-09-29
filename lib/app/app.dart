@@ -108,6 +108,10 @@ class _OmpAppState extends ConsumerState<OmpApp> {
             KeepaliveRegistry.forGwId(gwId)?.approvalPressed(requestId, action);
           }
         }
+      case 'keepaliveEnded':
+        if (gwId is String) {
+          KeepaliveRegistry.forGwId(gwId)?.systemStopped();
+        }
       case 'openSession':
         if (gwId is String) _openSession(gwId);
       case 'newSession':

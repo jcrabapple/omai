@@ -26,7 +26,9 @@ abstract class KeepaliveSurface {
   Future<bool> ensureNotificationPermission();
 
   /// Start (or restart) the foreground service with the Running notification.
-  Future<void> showRunning({
+  /// False when Android refused the start (background start restrictions);
+  /// the caller must then fall back to pausing.
+  Future<bool> showRunning({
     required String gwId,
     required String sessionTitle,
     String? tool,
@@ -98,8 +100,7 @@ String runningNotificationTitle(String sessionTitle) =>
 
 /// Elapsed-turn fragment: 45s / 3m / 1h 05m.
 String formatElapsed(int startedAt, DateTime now) {
-  final seconds =
-      (now.millisecondsSinceEpoch - startedAt) ~/ 1000;
+  final seconds = (now.millisecondsSinceEpoch - startedAt) ~/ 1000;
   if (seconds < 0) return '0s';
   if (seconds < 60) return '${seconds}s';
   if (seconds < 3600) return '${seconds ~/ 60}m';
@@ -231,8 +232,7 @@ class KeepaliveRegistry {
   KeepaliveRegistry._();
   static final Map<String, KeepaliveCoordinator> _byGwId = {};
 
-  static void attach(String gwId, KeepaliveCoordinator c) =>
-      _byGwId[gwId] = c;
+  static void attach(String gwId, KeepaliveCoordinator c) => _byGwId[gwId] = c;
   static void detach(String gwId) => _byGwId.remove(gwId);
   static KeepaliveCoordinator? forGwId(String gwId) => _byGwId[gwId];
 }
@@ -293,15 +293,26 @@ class KeepaliveCoordinator {
       onPause();
       return;
     }
-    _serviceActive = true;
-    _lastTool = s.tool;
-    _lastUpdateMs = now().millisecondsSinceEpoch;
-    await surface.showRunning(
+    final started = await surface.showRunning(
       gwId: s.gwId,
       sessionTitle: s.sessionTitle,
       tool: s.tool,
       startedAt: s.turnStartedAt ?? now().millisecondsSinceEpoch,
     );
+    if (!started) {
+      // Android refused the foreground service: nothing keeps the process
+      // alive, so behave exactly like an idle background.
+      onPause();
+      return;
+    }
+    if (!_backgrounded) {
+      // Came back to the foreground while the start was in flight.
+      await surface.stopRunning();
+      return;
+    }
+    _serviceActive = true;
+    _lastTool = s.tool;
+    _lastUpdateMs = now().millisecondsSinceEpoch;
     _syncApprovals(s);
     _tick?.cancel();
     _tick = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -313,6 +324,21 @@ class KeepaliveCoordinator {
   Future<void> appForegrounded() async {
     _backgrounded = false;
     await _stopService();
+  }
+
+  /// Android stopped the service itself (dataSync time budget exhausted).
+  /// The process is no longer protected: pause like an idle background.
+  Future<void> systemStopped() async {
+    final wasActive = _serviceActive;
+    _tick?.cancel();
+    _tick = null;
+    _serviceActive = false;
+    final notified = _approvalNotified.toList();
+    _approvalNotified.clear();
+    for (final id in notified) {
+      await surface.cancelApproval(id);
+    }
+    if (wasActive && _backgrounded) onPause();
   }
 
   /// The user tapped Stop on the notification.
@@ -397,16 +423,18 @@ class KeepaliveCoordinator {
     for (final u in blocking) {
       if (_approvalNotified.contains(u.id)) continue;
       _approvalNotified.add(u.id);
-      unawaited(surface.showApproval(
-        requestId: u.id,
-        gwId: s.gwId,
-        title: approvalNotificationTitle(u),
-        body: approvalNotificationBody(u),
-        actions: approvalActionsFor(u),
-      ));
+      unawaited(
+        surface.showApproval(
+          requestId: u.id,
+          gwId: s.gwId,
+          title: approvalNotificationTitle(u),
+          body: approvalNotificationBody(u),
+          actions: approvalActionsFor(u),
+        ),
+      );
     }
-    for (final id in _approvalNotified.where((id) => !current.contains(id))
-        .toList()) {
+    for (final id
+        in _approvalNotified.where((id) => !current.contains(id)).toList()) {
       _approvalNotified.remove(id);
       unawaited(surface.cancelApproval(id));
     }
