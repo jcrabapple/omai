@@ -9,6 +9,8 @@
 // Polling lives here: it runs while this screen is on top and the app is
 // resumed (RouteAware + AppLifecycleListener), and stops otherwise.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -339,8 +341,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       final info = await client.startSession(resumeFrom: s.file);
       if (!mounted) return;
       store.patch(info);
-      await store.refresh();
-      if (!mounted) return;
+      // Open right away; the listing refresh runs in the background. A
+      // refresh failure must not block or error the open (store.refresh
+      // reports its own error into the store without throwing).
+      unawaited(store.refresh());
       _openSession(info.gwId);
       if (info.cwdFallback) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -63,6 +63,13 @@ class LocalSendFailedInput extends TranscriptInput {
   const LocalSendFailedInput({required this.localId, required this.error});
 }
 
+/// Retry a failed local send: the SAME bubble flips back to pending (no
+/// second bubble is created).
+class LocalSendRetryInput extends TranscriptInput {
+  final String localId;
+  const LocalSendRetryInput(this.localId);
+}
+
 class PendingUiInput extends TranscriptInput {
   final List<UiRequest> requests;
   const PendingUiInput(this.requests);
@@ -109,6 +116,15 @@ TranscriptState reduce(TranscriptState state, TranscriptInput input) {
       final d = _open(state);
       final prev = d.items[i] as UserItem;
       d.items[i] = prev.copyWith(pending: false, failed: true, error: input.error);
+      return _close(d);
+    case LocalSendRetryInput():
+      final i = state.items.indexWhere(
+          (it) => it is UserItem && it.localId == input.localId && it.failed == true);
+      if (i < 0) return state;
+      final d = _open(state);
+      final prev = d.items[i] as UserItem;
+      d.items[i] =
+          prev.copyWith(pending: true, failed: false, clearError: true);
       return _close(d);
     case PendingUiInput():
       final d = _open(state);

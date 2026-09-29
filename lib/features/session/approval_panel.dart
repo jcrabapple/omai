@@ -105,9 +105,15 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
         ),
         child: SafeArea(
           top: false,
-          child: Padding(
-            padding: const EdgeInsets.all(OmpMetrics.s4),
-            child: Column(
+          child: ConstrainedBox(
+            // Bounded height: with the keyboard up there is little room, and
+            // an unbounded column overflows (web .panel: max-height 70dvh).
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * 0.7),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(OmpMetrics.s4),
+                child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -139,20 +145,27 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
                 ),
                 if (head.detail.isNotEmpty) ...[
                   const SizedBox(height: OmpMetrics.s2),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
-                    decoration: BoxDecoration(
-                      color: tokens.inset,
-                      borderRadius:
-                          BorderRadius.circular(OmpMetrics.radiusMd),
-                    ),
-                    child: SelectionArea(
-                      child: Text(head.detail,
-                          style: TextStyle(
-                              color: tokens.ink2,
-                              fontSize: OmpMetrics.fsSm,
-                              fontFamily: 'monospace')),
+                  ConstrainedBox(
+                    // Long commands scroll inside their own box (web .detail:
+                    // max-height 30dvh, overflow auto).
+                    constraints: const BoxConstraints(maxHeight: 160),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
+                      decoration: BoxDecoration(
+                        color: tokens.inset,
+                        borderRadius:
+                            BorderRadius.circular(OmpMetrics.radiusMd),
+                      ),
+                      child: SingleChildScrollView(
+                        child: SelectionArea(
+                          child: Text(head.detail,
+                              style: TextStyle(
+                                  color: tokens.ink2,
+                                  fontSize: OmpMetrics.fsSm,
+                                  fontFamily: 'monospace')),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -184,6 +197,8 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
           ),
         ),
       ),
+        ),
+      ),
     );
   }
 
@@ -213,6 +228,11 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
             controller: _field,
             maxLines: isEditor ? 6 : 1,
             enabled: !disabled,
+            textInputAction:
+                isEditor ? TextInputAction.newline : TextInputAction.send,
+            onSubmitted: (isEditor || disabled)
+                ? null
+                : (_) => _answer(UiAnswer.value(_field.text)),
             style: TextStyle(
                 color: tokens.ink,
                 fontSize: OmpMetrics.fsBase,
@@ -265,16 +285,19 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
         bg = tokens.press;
         fg = tokens.ink;
     }
-    return SizedBox(
-      height: OmpMetrics.hit,
+    return ConstrainedBox(
+      // Minimum touch target; long labels wrap instead of ellipsizing.
+      constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
       child: FilledButton(
         style: FilledButton.styleFrom(
           backgroundColor: bg,
           foregroundColor: fg,
           disabledBackgroundColor: Color.lerp(bg, tokens.canvas, 0.5),
+          padding: const EdgeInsets.symmetric(
+              horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
         ),
         onPressed: disabled ? null : onTap,
-        child: Text(label, overflow: TextOverflow.ellipsis),
+        child: Text(label, textAlign: TextAlign.center),
       ),
     );
   }

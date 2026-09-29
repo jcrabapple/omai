@@ -102,11 +102,8 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
 
   Future<void> _start() async {
     if (_starting) return;
-    final dir = _cwd.text.trim();
-    if (dir.isEmpty) {
-      setState(() => _error = 'Enter a folder for the session.');
-      return;
-    }
+    // Web NewSessionSheet: an empty field means the default cwd, not an error.
+    final dir = _cwd.text.trim().isEmpty ? defaultCwd : _cwd.text.trim();
     setState(() {
       _starting = true;
       _error = null;
@@ -373,7 +370,7 @@ class _ChoiceChip extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
         child: Container(
-          constraints: const BoxConstraints(minHeight: 36),
+          constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
           padding:
               const EdgeInsets.symmetric(horizontal: OmpMetrics.s3),
           alignment: Alignment.center,

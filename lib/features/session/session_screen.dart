@@ -93,16 +93,21 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
             // Blocking dialogs take over the composer slot; non-blocking
             // notify requests never reach pendingUi (the reducer filters).
             if (state.pendingUi.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: OmpMetrics.s3,
-                  vertical: OmpMetrics.s2,
-                ),
-                child: ApprovalPanel(
-                  gwId: widget.gwId,
-                  request: state.pendingUi.first,
-                  index: 1,
-                  total: state.pendingUi.length,
+              // Flexible: bounds the panel to the space left above the
+              // keyboard (a Column hands non-flex children unbounded height,
+              // which is exactly how the old panel overflowed).
+              Flexible(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: OmpMetrics.s3,
+                    vertical: OmpMetrics.s2,
+                  ),
+                  child: ApprovalPanel(
+                    gwId: widget.gwId,
+                    request: state.pendingUi.first,
+                    index: 1,
+                    total: state.pendingUi.length,
+                  ),
                 ),
               )
             else

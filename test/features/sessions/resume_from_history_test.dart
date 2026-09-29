@@ -3,6 +3,7 @@
 // cwdFallback surfaces a notice naming the dead folder and the cwd used, and
 // errors show as a SnackBar. The gateway is a MockClient; no network.
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart' hide ConnectionState;
@@ -67,12 +68,21 @@ class _MemoryDraftKv implements DraftKv {
 }
 
 /// Scriptable gateway: the sessions listing plus a create/resume POST whose
-/// response each test controls.
+/// response each test controls. [listGate] holds every GET /api/sessions
+/// after the first (the initial load) until completed; [listStatusAfterFirst]
+/// makes subsequent listings fail with that status.
 class ResumeGateway {
-  ResumeGateway({this.saved = const [], this.resumeResponse});
+  ResumeGateway(
+      {this.saved = const [],
+      this.resumeResponse,
+      this.listGate,
+      this.listStatusAfterFirst});
   List<Map<String, Object?>> saved;
   Map<String, Object?>? resumeResponse;
+  Completer<void>? listGate;
+  int? listStatusAfterFirst;
   final List<Object?> bodies = [];
+  int listCalls = 0;
 
   http.Client client() => MockClient((req) async {
         if (req.method == 'POST' && req.url.path == '/api/sessions') {
@@ -84,11 +94,21 @@ class ResumeGateway {
                 'approvalMode': 'yolo',
               });
         }
+        if (req.url.path == '/api/sessions') {
+          // Only the listing AFTER the resume POST is scripted: the initial
+          // screen load may make several listing calls before that.
+          if (bodies.isNotEmpty) {
+            final gate = listGate;
+            if (gate != null) await gate.future;
+            final status = listStatusAfterFirst;
+            if (status != null) {
+              return _json({'error': 'nope'}, status: status);
+            }
+          }
+          return _json({'live': const [], 'saved': saved});
+        }
         if (req.url.path.endsWith('/messages')) {
           return _json({'messages': []});
-        }
-        if (req.url.path == '/api/sessions') {
-          return _json({'live': const [], 'saved': saved});
         }
         return _json({'live': const [], 'saved': const []});
       });
@@ -277,5 +297,70 @@ void main() {
     expect(find.byType(SnackBar), findsOneWidget);
     expect(find.textContaining('session limit reached'), findsOneWidget);
     expect(find.byType(SessionScreen), findsNothing);
+  });
+
+  testWidgets('resume opens the session immediately; the listing refresh '
+      'runs in the background', (tester) async {
+    final gateway = ResumeGateway(
+      saved: [_savedJson()],
+      listGate: Completer<void>(), // the post-resume listing never completes
+      resumeResponse: {
+        'gwId': 'gw-resumed',
+        'cwd': '/work/prompter',
+        'approvalMode': 'yolo',
+      },
+    );
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    // Debug
+    // ignore: avoid_print
+    print('DBG saved=${container.read(sessionsStoreProvider).saved.length} '
+        'err=${container.read(sessionsStoreProvider).error} '
+        'calls=${gateway.listCalls}');
+
+    await tester.tap(find.text('Old session'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // The refresh is still hung, but the session must already be open.
+    expect(find.byType(SessionScreen), findsOneWidget,
+        reason: 'opening must not wait on the listing refresh');
+    expect(gateway.bodies.single, {'resumeFrom': '/t/one.jsonl'});
+
+    // Let the hung request settle before the container is disposed.
+    gateway.listGate!.complete();
+    await tester.pump(const Duration(milliseconds: 100));
+  });
+
+  testWidgets('a failing listing refresh does not block or error the resume',
+      (tester) async {
+    final gateway = ResumeGateway(
+      saved: [_savedJson()],
+      listStatusAfterFirst: 504,
+      resumeResponse: {
+        'gwId': 'gw-resumed',
+        'cwd': '/work/prompter',
+        'approvalMode': 'yolo',
+      },
+    );
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    // Debug
+    // ignore: avoid_print
+    debugPrint('DBG saved=${container.read(sessionsStoreProvider).saved.length} '
+        'err=${container.read(sessionsStoreProvider).error}');
+
+    await tester.tap(find.text('Old session'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.byType(SessionScreen), findsOneWidget,
+        reason: 'a failed background refresh must not abort the open');
+    expect(find.byType(SnackBar), findsNothing,
+        reason: 'the resume itself succeeded; no error surfaced');
   });
 }

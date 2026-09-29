@@ -22,6 +22,7 @@ import '../composer/slash.dart' show SlashCommand;
 import '../stream/scheduler.dart';
 import '../stream/session_stream.dart';
 import '../transcript/reducer.dart';
+import '../transcript/items.dart' show UserItem;
 import '../wire/wire.dart' show OmpEvent, UiRequest;
 import 'connection_notifier.dart';
 import 'reviewed_store.dart';
@@ -65,6 +66,7 @@ class SessionState {
     this.slashCommands = const [],
     this.queued = 0,
     this.activity,
+    this.retryingSends = const <String>{},
   }) : transcript = transcript ?? emptyTranscript();
 
   final String gwId;
@@ -95,6 +97,10 @@ class SessionState {
 
   final ActivitySummary? activity;
 
+  /// Local send ids currently being retried, so the Retry affordance can
+  /// disable itself and re-entry is visible in state.
+  final Set<String> retryingSends;
+
   /// Blocking dialogs omp is waiting on (for the approval takeover UI).
   List<UiRequest> get pendingUi => transcript.pendingUi;
 
@@ -116,6 +122,7 @@ class SessionState {
     int? queued,
     ActivitySummary? activity,
     bool clearActivity = false,
+    Set<String>? retryingSends,
   }) {
     return SessionState(
       gwId: gwId,
@@ -130,6 +137,7 @@ class SessionState {
       slashCommands: slashCommands ?? this.slashCommands,
       queued: queued ?? this.queued,
       activity: clearActivity ? null : (activity ?? this.activity),
+      retryingSends: retryingSends ?? this.retryingSends,
     );
   }
 }
@@ -568,16 +576,26 @@ class SessionController extends Notifier<SessionState> {
 
   int _localCounter = 0;
 
+  /// Local send ids with a retry in flight (re-entry guard).
+  final Set<String> _retrying = {};
+
   /// Send a prompt. Optimistic: the LocalSendInput paints the bubble before
   /// the request goes out. Durable at the composer level: on failure the
   /// bubble turns into a failed one (Retry affordance) and the composer puts
   /// the text back. The review pin clears only after the gateway accepts.
   Future<bool> send(String text,
-      {String mode = 'prompt', List<Map<String, String>>? images}) async {
-    final localId = 'local-${++_localCounter}';
+      {String mode = 'prompt',
+      List<Map<String, String>>? images,
+      String? retryLocalId}) async {
+    final localId = retryLocalId ?? 'local-${++_localCounter}';
     if (ref.mounted) state = state.copyWith(clearWsError: true);
-    _dispatch(LocalSendInput(
-        localId: localId, text: text, mode: mode, images: images));
+    if (retryLocalId != null) {
+      // Retry: the SAME failed bubble flips back to pending; no second one.
+      _dispatch(LocalSendRetryInput(localId));
+    } else {
+      _dispatch(LocalSendInput(
+          localId: localId, text: text, mode: mode, images: images));
+    }
     try {
       final env = await ref.read(sessionEnvProvider.future);
       final info = await env.client.prompt(gwId, text, mode: mode, images: images);
@@ -597,6 +615,35 @@ class SessionController extends Notifier<SessionState> {
           error:
               e is GatewayClientError ? e.message : 'Send failed'));
       return false;
+    }
+  }
+
+  /// Retry a FAILED local send, identified by its local id. Controller-level
+  /// guard (review finding: double-tap Retry must not double-send): re-entry
+  /// while the retry is in flight is ignored, and the failed bubble is
+  /// REUSED (same bubble flips back to pending, no second one).
+  Future<bool> retrySend(String localId) async {
+    if (_retrying.contains(localId)) return false;
+    UserItem? failed;
+    for (final it in state.transcript.items) {
+      if (it is UserItem && it.localId == localId && it.failed == true) {
+        failed = it;
+      }
+    }
+    final text = failed?.text.trim() ?? '';
+    if (text.isEmpty) return false;
+    _retrying.add(localId);
+    if (ref.mounted) {
+      state = state.copyWith(retryingSends: {...state.retryingSends, localId});
+    }
+    try {
+      return await send(text, retryLocalId: localId);
+    } finally {
+      _retrying.remove(localId);
+      if (ref.mounted) {
+        final next = {...state.retryingSends}..remove(localId);
+        state = state.copyWith(retryingSends: next);
+      }
     }
   }
 

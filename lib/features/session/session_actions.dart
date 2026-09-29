@@ -25,67 +25,75 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
   Future<void> _rename() async {
     final controller = TextEditingController(
         text: ref.read(sessionControllerProvider(widget.gwId)).info?.title ?? '');
-    final name = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Rename session'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          onSubmitted: (v) => Navigator.of(context).pop(v),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(controller.text),
-              child: const Text('Rename')),
-        ],
-      ),
-    );
-    if (name == null) return;
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) return;
     try {
-      await ref
-          .read(sessionControllerProvider(widget.gwId).notifier)
-          .rename(trimmed);
-    } catch (_) {
-      _snack('Could not rename the session');
+      final name = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Rename session'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            onSubmitted: (v) => Navigator.of(context).pop(v),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(controller.text),
+                child: const Text('Rename')),
+          ],
+        ),
+      );
+      if (name == null) return;
+      final trimmed = name.trim();
+      if (trimmed.isEmpty) return;
+      try {
+        await ref
+            .read(sessionControllerProvider(widget.gwId).notifier)
+            .rename(trimmed);
+      } catch (_) {
+        _snack('Could not rename the session');
+      }
+    } finally {
+      controller.dispose();
     }
   }
 
   Future<void> _compact() async {
     final controller = TextEditingController();
-    final instructions = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Compact context'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration:
-              const InputDecoration(hintText: 'What should it keep? (optional)'),
-          onSubmitted: (v) => Navigator.of(context).pop(v),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(controller.text),
-              child: const Text('Compact')),
-        ],
-      ),
-    );
-    if (instructions == null) return;
     try {
-      await ref
-          .read(sessionControllerProvider(widget.gwId).notifier)
-          .compact(instructions.trim().isEmpty ? null : instructions.trim());
-    } catch (_) {
-      _snack('Could not compact the session');
+      final instructions = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Compact context'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration:
+                const InputDecoration(hintText: 'What should it keep? (optional)'),
+            onSubmitted: (v) => Navigator.of(context).pop(v),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(controller.text),
+                child: const Text('Compact')),
+          ],
+        ),
+      );
+      if (instructions == null) return;
+      try {
+        await ref
+            .read(sessionControllerProvider(widget.gwId).notifier)
+            .compact(instructions.trim().isEmpty ? null : instructions.trim());
+      } catch (_) {
+        _snack('Could not compact the session');
+      }
+    } finally {
+      controller.dispose();
     }
   }
 

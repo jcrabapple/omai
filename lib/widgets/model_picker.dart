@@ -4,6 +4,8 @@
 // constructor, so tests need no gateway. [showModelPickerSheet] wires it to
 // the models store as a modal bottom sheet.
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -272,13 +274,25 @@ Future<void> showModelPickerSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    builder: (sheetContext) => Consumer(builder: (context, ref, _) {
+    builder: (sheetContext) => Padding(
+      // The search field summons the keyboard; isScrollControlled disables
+      // the automatic inset handling, so pad by viewInsets or the keyboard
+      // covers the list.
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+      child: Consumer(builder: (context, ref, _) {
       final store = ref.read(modelsStoreProvider.notifier);
       final models = ref.watch(modelsStoreProvider);
       return SafeArea(
         child: ConstrainedBox(
+          // Cap by the space actually available above the keyboard, not by
+          // the raw 70% of the screen (keyboard insets would push the sheet
+          // off-screen otherwise).
           constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(sheetContext).size.height * 0.7),
+              maxHeight: math.max(
+                  0,
+                  MediaQuery.of(sheetContext).size.height * 0.7 -
+                      MediaQuery.of(sheetContext).viewInsets.bottom)),
           child: ModelPicker(
             models: models.models,
             loading: !models.ready && models.error == null,
@@ -295,5 +309,6 @@ Future<void> showModelPickerSheet(
         ),
       );
     }),
+    ),
   );
 }

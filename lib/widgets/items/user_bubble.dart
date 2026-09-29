@@ -19,7 +19,11 @@ class UserBubble extends StatelessWidget {
   /// Present on a failed send: draws the Retry affordance under the bubble.
   final void Function(UserItem item)? onRetry;
 
-  const UserBubble({super.key, required this.item, this.onRetry});
+  /// True while the retry is in flight: the button disables (no double-send).
+  final bool retrying;
+
+  const UserBubble(
+      {super.key, required this.item, this.onRetry, this.retrying = false});
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +113,7 @@ class UserBubble extends StatelessWidget {
               ),
               if (onRetry != null)
                 TextButton.icon(
-                  onPressed: () => onRetry!(item),
+                  onPressed: retrying ? null : () => onRetry!(item),
                   icon: Icon(Icons.refresh, size: 16, color: t.err),
                   label: Text('Retry',
                       style: TextStyle(color: t.err, fontSize: OmpMetrics.fsSm)),

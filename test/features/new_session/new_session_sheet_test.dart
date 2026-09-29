@@ -169,19 +169,20 @@ Future<void> _pump(WidgetTester tester, ProviderContainer container,
 }
 
 void main() {
-  testWidgets('an empty cwd shows a validation error and posts nothing',
-      (tester) async {
+  testWidgets('an empty cwd defaults to the web default (~/projects) and '
+      'posts it', (tester) async {
     final gateway = FakeGateway();
     final container = _container(gateway);
     addTearDown(container.dispose);
     await _pump(tester, container);
 
-    await tester.enterText(find.byType(TextField).first, '');
+    await tester.enterText(find.byType(TextField).first, '   ');
     await tester.tap(find.text('Start'));
     await tester.pump();
+    await tester.pump();
 
-    expect(find.text('Enter a folder for the session.'), findsOneWidget);
-    expect(gateway.bodies, isEmpty);
+    // Web NewSessionSheet: `const dir = cwd.trim() || DEFAULT_CWD`.
+    expect((gateway.bodies.single as Map)['cwd'], '~/projects');
   });
 
   testWidgets('a recent cwd chip fills the folder field', (tester) async {
@@ -241,5 +242,22 @@ void main() {
     expect(find.byType(SessionScreen), findsNothing);
     // The sheet stays open, so the user can go stop one and retry.
     expect(find.text('New session'), findsOneWidget);
+  });
+
+  testWidgets('thinking chips are at least 48dp tall (touch target)',
+      (tester) async {
+    final gateway = FakeGateway();
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    final chip = tester.getSize(
+      find.ancestor(
+        of: find.text('medium'),
+        matching: find.byType(InkWell),
+      ).first,
+    );
+    expect(chip.height, greaterThanOrEqualTo(48.0),
+        reason: 'thinking-level chips must meet the 48dp hit target');
   });
 }

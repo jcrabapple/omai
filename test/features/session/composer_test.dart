@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart' hide ConnectionState;
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -22,6 +23,7 @@ import 'package:ohmypi/state/sessions_store.dart';
 import 'package:ohmypi/stream/scheduler.dart';
 import 'package:ohmypi/stream/session_stream.dart';
 import 'package:ohmypi/theme/presets.dart';
+import 'package:ohmypi/widgets/items/user_bubble.dart';
 
 import '../../stream/fakes.dart';
 
@@ -398,5 +400,161 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(minutes: 1));
     semantics.dispose();
+  });
+
+  testWidgets('a double-tapped retry fires exactly one POST and keeps one '
+      'bubble (controller-level guard)', (tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final gateway = FakeGateway()..failPaths.add('/prompt');
+    final container = _container(gateway: gateway, hub: SocketHub());
+    addTearDown(container.dispose);
+    final semantics = tester.ensureSemantics();
+    await _pumpReady(tester, container);
+
+    await _type(tester, 'retry me');
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Retry'), findsOneWidget);
+    expect(gateway.promptCalls, 0,
+        reason: 'the mock only counts prompts that reach the success branch; '
+            'the failed send never gets there');
+
+    // The retry goes through, but is held in flight by the fake gateway.
+    gateway.failPaths.clear();
+    gateway.promptGate = Completer<void>();
+    // Two rapid taps: the second lands while the first is still in flight.
+    await tester.tap(find.text('Retry'));
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(gateway.promptCalls, 1,
+        reason: 'exactly ONE retry POST despite the double tap');
+
+    // The retry flips the SAME bubble back to pending: the Retry affordance
+    // is gone (disabled/absent) while the retry is in flight.
+    expect(find.text('Retry'), findsNothing,
+        reason: 'the Retry button disables while the retry is in flight');
+
+    // The ack arrives: the SAME bubble is now pending/sent, no second one,
+    // and the failure note is gone.
+    gateway.promptGate!.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(UserBubble), findsOneWidget,
+        reason: 'the failed bubble is reused, not duplicated');
+    expect(find.textContaining('Not sent'), findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets('an ack arriving after the composer unmounted still clears '
+      'the draft', (tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final drafts = MemoryDraftKv();
+    final gateway = FakeGateway()..promptGate = Completer<void>();
+    final container =
+        _container(gateway: gateway, hub: SocketHub(), drafts: drafts);
+    addTearDown(container.dispose);
+    final semantics = tester.ensureSemantics();
+    await _pumpReady(tester, container);
+
+    await _type(tester, 'gone before the ack');
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+    // Let the debounced draft save (250ms) land while the send is gated.
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(drafts.map.containsKey(draftKey('c1', 'abc')), isTrue);
+
+    // Leave the session screen mid-send (the composer is disposed).
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: OmpTheme.data(OmpPreset.terminal)),
+      ),
+    );
+    await tester.pump();
+
+    // The ack arrives with nobody home: the draft must clear anyway.
+    gateway.promptGate!.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(drafts.map.containsKey(draftKey('c1', 'abc')), isFalse,
+        reason: 'the draft clear must not depend on the composer being '
+            'mounted');
+
+    // Reopening shows an empty composer: no accidental duplicate sends.
+    await _pumpReady(tester, container);
+    expect(
+      tester.widget<TextField>(_composerField()).controller!.text,
+      '',
+      reason: 'the sent words must not come back as a draft',
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('Escape dismisses the slash menu (hardware keyboard)',
+      (tester) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final gateway = FakeGateway(commands: [
+      {'name': 'model', 'description': 'Pick a model', 'source': 'builtin'},
+    ]);
+    final container = _container(gateway: gateway, hub: SocketHub());
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    await _type(tester, '/mo');
+    expect(find.text('/model'), findsOneWidget,
+        reason: 'the menu is open');
+
+    // Web Composer.svelte: Escape sets dismissedFor = text.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.text('/model'), findsNothing,
+        reason: 'Escape dismisses the menu');
+    expect(
+      tester.widget<TextField>(_composerField()).controller!.text,
+      '/mo',
+      reason: 'the text itself is untouched',
+    );
+
+    // Typing again re-opens the menu.
+    await _type(tester, '/mod');
+    expect(find.text('/model'), findsOneWidget);
+  });
+
+  testWidgets('the composer respects the bottom system inset with the '
+      'keyboard down, and stays flush with the keyboard up',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.padding = FakeViewPadding(bottom: 24);
+    addTearDown(tester.view.reset);
+    final container = _container(gateway: FakeGateway(), hub: SocketHub());
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+    await _type(tester, 'hi');
+
+    double sendBottom() =>
+        tester.getBottomRight(find.byIcon(Icons.arrow_upward)).dy;
+
+    // Keyboard down: the gesture-nav inset keeps the send button off the
+    // system pill: 24dp inset + the composer's own 12dp bottom padding,
+    // i.e. at most 640 - 24 - 12 = 604. (Pre-fix: 607, the button sits in
+    // the gesture area.)
+    expect(sendBottom(), lessThanOrEqualTo(604),
+        reason: 'SafeArea(top:false) pads by the system inset');
+
+    // Keyboard up: the inset collapses (the keyboard owns the bottom edge).
+    tester.view.viewInsets = FakeViewPadding(bottom: 330);
+    await tester.pump();
+    expect(sendBottom(), lessThanOrEqualTo(640),
+        reason: 'keyboard up: the composer stays flush, no double padding');
+    expect(tester.takeException(), isNull);
   });
 }

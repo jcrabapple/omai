@@ -49,9 +49,22 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   @override
   void initState() {
     super.initState();
+    // Escape dismisses the slash menu (hardware keyboard), like the web's
+    // keydown handler setting `dismissedFor`.
+    _focus.onKeyEvent = _handleKey;
     _kv = ref.read(draftKvProvider);
     _connId = ref.read(connectionNotifierProvider).active?.id ?? '';
     _loadDraft();
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape &&
+        slashQuery(_text.text) != null) {
+      setState(() => _dismissedFor = _text.text);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -108,7 +121,15 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final ok = await ref
         .read(sessionControllerProvider(widget.gwId).notifier)
         .send(message, mode: mode);
-    if (!mounted) return;
+    if (!mounted) {
+      // Unmounted mid-send (user backed out): the draft clear must not depend
+      // on this widget being alive. A captured kv/key clears it even here.
+      final kv = _kv;
+      if (ok && kv != null) {
+        unawaited(clearDraft(kv, _connId, widget.gwId));
+      }
+      return;
+    }
     setState(() => _sending = false);
     if (ok) {
       // Clear only after the ack; a failure puts the words back.
@@ -155,13 +176,15 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
             ? 0
             : (_sel >= flat.length ? flat.length - 1 : _sel);
 
-    return Padding(
-      padding: EdgeInsets.only(
-          left: OmpMetrics.s3,
-          right: OmpMetrics.s3,
-          top: OmpMetrics.s2,
-          bottom: OmpMetrics.s3),
-      child: Column(
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.only(
+            left: OmpMetrics.s3,
+            right: OmpMetrics.s3,
+            top: OmpMetrics.s2,
+            bottom: OmpMetrics.s3),
+        child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -252,6 +275,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
             ),
           ),
         ],
+        ),
       ),
     );
   }

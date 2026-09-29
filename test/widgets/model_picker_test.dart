@@ -3,8 +3,10 @@
 // states render. Pure widget; no gateway.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ohmypi/api/models.dart';
+import 'package:ohmypi/state/models_store.dart';
 import 'package:ohmypi/theme/presets.dart';
 import 'package:ohmypi/widgets/model_picker.dart';
 
@@ -148,4 +150,67 @@ void main() {
         .first);
     expect(row.height, greaterThanOrEqualTo(48));
   });
+
+  testWidgets('showModelPickerSheet pads by viewInsets so the keyboard does '
+      'not cover the list', (tester) async {
+    CatalogModel? picked;
+    // Small surface, keyboard up, several models so the list is tall.
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.viewInsets = FakeViewPadding(bottom: 200);
+    addTearDown(tester.view.reset);
+
+    final container = ProviderContainer(overrides: [
+      modelsStoreProvider.overrideWith(() => _SeededModelsStore(models)),
+    ]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        theme: OmpTheme.data(OmpPreset.terminal),
+        home: Consumer(builder: (context, ref, _) => Scaffold(
+          body: const SizedBox.shrink(),
+          floatingActionButton: FloatingActionButton(
+            onPressed: () => showModelPickerSheet(
+              context,
+              ref,
+              onPick: (m) => picked = m,
+            ),
+          ),
+        )),
+      ),
+    ));
+    await tester.pump();
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pump();
+    // Let the sheet's entrance animation settle before measuring.
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump();
+
+    // The keyboard covers y in [440, 640]. The whole sheet must sit above
+    // the keyboard top: without the viewInsets padding the sheet hugs the
+    // bottom and the list is under the keyboard.
+    expect(
+      tester.getBottomRight(find.byType(ModelPicker).first).dy,
+      lessThanOrEqualTo(440.0),
+      reason: 'the sheet must be lifted above the keyboard',
+    );
+    // The first rows are on screen above the keyboard.
+    expect(tester.getBottomRight(find.text('Claude Sonnet')).dy,
+        lessThanOrEqualTo(440.0));
+    // Tapping a visible row still picks it.
+    await tester.tap(find.text('Claude Sonnet'), warnIfMissed: false);
+    await tester.pump();
+    await tester.pump();
+    expect(picked?.id, 'sonnet');
+  });
+}
+
+/// Store override so the sheet's Consumer sees a fixed catalog (no gateway).
+class _SeededModelsStore extends ModelsStore {
+  _SeededModelsStore(this.seed);
+  final List<CatalogModel> seed;
+  @override
+  ModelsState build() =>
+      ModelsState(models: seed, ready: true);
 }

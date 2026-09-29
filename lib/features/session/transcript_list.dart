@@ -110,12 +110,14 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
     _blockKeys = keys;
   }
 
-  /// Retry a failed local send: re-send the text. The failed bubble stays
-  /// until a fresh echo or the reducer's settle pass cleans it up.
+  /// Retry a failed local send: re-send the text. The retry lives in the
+  /// CONTROLLER (retrySend): the failed bubble is reused, re-entry while the
+  /// retry is in flight is ignored, and the button disables via
+  /// `retryingSends` in the state.
   void _retrySend(UserItem item) {
-    final text = item.text.trim();
-    if (text.isEmpty) return;
-    ref.read(sessionControllerProvider(widget.state.gwId).notifier).send(text);
+    final localId = item.localId ??
+        (item.id.startsWith('local:') ? item.id.substring(6) : item.id);
+    ref.read(sessionControllerProvider(widget.state.gwId).notifier).retrySend(localId);
   }
 
   void _onScroll() {
@@ -250,6 +252,11 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
                             (b.item as UserItem).failed == true
                         ? _retrySend
                         : null,
+                    retryingSend:
+                        b.item is UserItem &&
+                            state.retryingSends.contains(
+                                (b.item as UserItem).localId ??
+                                    (b.item as UserItem).id),
                   ),
                 ),
         ),
