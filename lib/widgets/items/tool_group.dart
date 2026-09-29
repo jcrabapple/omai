@@ -65,7 +65,10 @@ class _ToolGroupState extends State<ToolGroup> {
         children: [
           for (var i = 0; i < widget.tools.length; i++) ...[
             if (i > 0) Divider(height: 1, thickness: 1, color: t.line),
-            _row(context, widget.tools[i]),
+            KeyedSubtree(
+              key: ValueKey<String>(widget.tools[i].id),
+              child: _row(context, widget.tools[i]),
+            ),
           ],
         ],
       ),

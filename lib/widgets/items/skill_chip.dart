@@ -82,9 +82,11 @@ class _SkillChipState extends State<SkillChip> {
               borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
             ),
             child: SingleChildScrollView(
-              child: Text(
-                widget.item.content,
-                style: TextStyle(color: t.ink2, fontSize: OmpMetrics.fsSm),
+              child: SelectionArea(
+                child: Text(
+                  widget.item.content,
+                  style: TextStyle(color: t.ink2, fontSize: OmpMetrics.fsSm),
+                ),
               ),
             ),
           ),

@@ -2,6 +2,8 @@
 // web/src/lib/format.ts (the pure string/number helpers; session-title
 // helpers stay web-side because they read web API types).
 
+import 'dart:math' as math;
+
 /// `proj` from `/a/b/proj/`, `''` from `''`/null.
 String basename(String? path) {
   if (path == null || path.isEmpty) return '';
@@ -14,7 +16,7 @@ String basename(String? path) {
 
 /// "now", "5m", "3h", "3d" style stamps kept short for the rail.
 String relativeTime(int ms, int now) {
-  final s = ((now - ms) / 1000).round();
+  final s = math.max(0, ((now - ms) / 1000).round());
   if (s < 45) return 'now';
   final m = (s / 60).round();
   if (m < 60) return '${m}m';

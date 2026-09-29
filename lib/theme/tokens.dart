@@ -26,8 +26,8 @@ abstract final class OmpMetrics {
   static const double fsLg = 16;
   static const double fsXl = 20;
 
-  /// Minimum touch target on coarse pointers (--hit: 44px).
-  static const double hit = 44;
+  /// Minimum touch target on coarse pointers (--hit: 48dp).
+  static const double hit = 48;
 }
 
 /// Per-preset color tokens, as a [ThemeExtension] so widgets reach them via

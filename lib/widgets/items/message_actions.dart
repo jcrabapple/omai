@@ -36,13 +36,13 @@ class MessageActions extends StatelessWidget {
     this.onInspect,
   });
 
-  void _openMenu(BuildContext context) {
+  void _openMenu(BuildContext context, Offset globalPosition) {
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
     final position = overlay == null
         ? null
         : RelativeRect.fromRect(
-            const Rect.fromLTWH(48, 48, 1, 1),
+            globalPosition & const Size(1, 1),
             Offset.zero & overlay.size,
           );
     showMenu<String>(
@@ -75,14 +75,30 @@ class MessageActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    void handle(BuildContext c) =>
-        onLongPress != null ? onLongPress!(c) : _openMenu(c);
+    // Anchor for callers without a gesture position (Semantics): the top
+    // left of this widget, in global coordinates.
+    Offset anchor() {
+      final box = context.findRenderObject() as RenderBox?;
+      return box?.localToGlobal(Offset.zero) ?? Offset.zero;
+    }
+
+    void handle(BuildContext c, [Offset? at]) {
+      if (onLongPress != null) {
+        onLongPress!(c);
+      } else {
+        _openMenu(c, at ?? anchor());
+      }
+    }
+
     return Semantics(
       label: label,
       onLongPressHint: 'Message actions',
       onLongPress: disabled ? null : () => handle(context),
       child: GestureDetector(
-        onLongPress: disabled ? null : () => handle(context),
+        // onLongPressStart alone: a long press also fires onLongPress, so
+        // wiring both would open the menu twice.
+        onLongPressStart:
+            disabled ? null : (details) => handle(context, details.globalPosition),
         child: child,
       ),
     );

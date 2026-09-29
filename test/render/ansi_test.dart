@@ -13,7 +13,6 @@ final palette = ansiPalette(tokens);
 bool hasBold(TextStyle? s) => s?.fontWeight == FontWeight.w700;
 bool hasItalic(TextStyle? s) => s?.fontStyle == FontStyle.italic;
 bool hasUnderline(TextStyle? s) => s?.decoration == TextDecoration.underline;
-bool hasDim(TextStyle? s) => s?.fontWeight == FontWeight.w300;
 
 Color? fgColor(TextSpan span) => span.style?.color;
 
@@ -26,6 +25,17 @@ void main() {
     test('passes plain text through', () {
       expect(textOf('a < b & "c"'), 'a < b & "c"');
       expect(textOf(''), '');
+    });
+
+    test('dim renders as 60% alpha, not a font weight', () {
+      const baseColor = Color(0xFFFFFFFF);
+      final dim = ansiToSpans('${e}2mdim${e}22m',
+              palette: palette, base: const TextStyle(color: baseColor))
+          .single;
+      expect(dim.style?.color?.a, closeTo(0.6, 0.01),
+          reason: 'SGR 2 dims the base color via alpha, not font weight');
+      final colored = spansOf('${e}31m${e}2mred${e}22m${e}39m').single;
+      expect(colored.style?.color?.a, closeTo(0.6, 0.01));
     });
 
     test('renders bold, dim, italic and underline', () {

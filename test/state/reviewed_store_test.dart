@@ -1,37 +1,84 @@
 // Ported from web/src/lib/state/__tests__/reviewed.test.ts (the persistence
 // tests; the two send-clears-pin cases are D2, see the bottom of this file).
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ohmypi/state/connection_notifier.dart';
 import 'package:ohmypi/state/connection_store.dart';
 import 'package:ohmypi/state/reviewed_store.dart';
 
-/// In-memory stand-in for device storage.
+/// In-memory stand-in for device storage, with per-key gates so tests can
+/// hold loads in flight.
 class MemoryKv implements ReviewedKv {
-  final Map<String, String> map = {};
+  final map = <String, String>{};
+  final _gates = <String, Completer<void>>{};
+
+  void gate(String key) => _gates[key] = Completer<void>();
+
+  void release(String key) => _gates[key]?.complete();
 
   @override
-  Future<String?> get(String key) async => map[key];
+  Future<String?> get(String key) async {
+    final gate = _gates[key];
+    if (gate != null) await gate.future;
+    return map[key];
+  }
 
   @override
   Future<void> set(String key, String value) async => map[key] = value;
 }
 
 class MemoryPrefs implements ConnectionPrefs {
+  MemoryPrefs([this.records = const []]);
+  final List<ConnectionRecord> records;
+
   @override
-  Future<List<ConnectionRecord>> load() async => const [];
+  Future<List<ConnectionRecord>> load() async => records;
 
   @override
   Future<void> save(List<ConnectionRecord> connections) async {}
 }
 
-ProviderContainer makeContainer(MemoryKv kv) {
+class _FixedTokens implements TokenStore {
+  const _FixedTokens();
+
+  @override
+  Future<String?> read(String connectionId) async => 'tok';
+
+  @override
+  Future<void> write(String connectionId, String token) async {}
+
+  @override
+  Future<void> delete(String connectionId) async {}
+}
+
+final _c1 = ConnectionRecord(id: 'c1', url: 'https://g', label: 'G1');
+final _c2 = ConnectionRecord(id: 'c2', url: 'https://g2', label: 'G2');
+
+/// [activeId] picks the signed-in connection ('c1' or 'c2'); the notifier's
+/// async initial load settles to it once the first test pumps the event
+/// queue (see the connection-switch tests).
+ProviderContainer makeContainer(MemoryKv kv, {String activeId = ''}) {
   final container = ProviderContainer(overrides: [
     reviewedKvProvider.overrideWithValue(kv),
-    connectionPrefsProvider.overrideWithValue(MemoryPrefs()),
+    if (activeId.isNotEmpty) ...[
+      // The most recently added connection is the default active one.
+      connectionPrefsProvider
+          .overrideWithValue(MemoryPrefs(activeId == 'c2' ? [_c2, _c1] : [_c1, _c2])),
+      tokenStoreProvider.overrideWithValue(const _FixedTokens()),
+    ] else
+      connectionPrefsProvider.overrideWithValue(MemoryPrefs()),
   ]);
   addTearDown(container.dispose);
   return container;
+}
+
+void _setActive(ProviderContainer container, String id) {
+  final c = container.read(connectionNotifierProvider);
+  container.read(connectionNotifierProvider.notifier).state = ConnectionState(
+      connections: c.connections,
+      activeId: c.connections.any((r) => r.id == id) ? id : null);
 }
 
 void main() {
@@ -119,6 +166,48 @@ void main() {
     expect(done.length, doneLedgerCap);
     expect(done.contains('gw-0'), isFalse);
     expect(done.contains('gw-${doneLedgerCap + 9}'), isTrue);
+  });
+
+  test('a connection switch discards an in-flight load for the old connection',
+      () async {
+    final kv = MemoryKv();
+    kv.map['ompgw-reviewed:c1'] = '["stale"]';
+    kv.map['ompgw-reviewed:c2'] = '["fresh"]';
+    kv.gate('ompgw-reviewed:c1');
+    final container = makeContainer(kv, activeId: 'c1');
+    await pumpEventQueue(); // let the connection load settle on c1
+    final sub = container.listen(reviewedStoreProvider, (_, _) {});
+    await pumpEventQueue();
+
+    // Switch connections while c1's load is still pending.
+    _setActive(container, 'c2');
+    await pumpEventQueue();
+    expect(container.read(reviewedStoreProvider).done, {'fresh'});
+
+    // Now the old load completes: it must be discarded, not merged in.
+    kv.release('ompgw-reviewed:c1');
+    await pumpEventQueue();
+    expect(container.read(reviewedStoreProvider).done, {'fresh'},
+        reason: "the first connection's data never lands in the second's state");
+    sub.close();
+  });
+
+  test('clear() marks the store dirty so a pending load cannot resurrect data',
+      () async {
+    final kv = MemoryKv();
+    kv.map['ompgw-reviewed:c1'] = '["x"]';
+    kv.gate('ompgw-reviewed:c1');
+    final container = makeContainer(kv, activeId: 'c1');
+    final store = container.read(reviewedStoreProvider.notifier);
+    container.read(reviewedStoreProvider);
+    await pumpEventQueue();
+
+    await store.clear();
+    kv.release('ompgw-reviewed:c1');
+    await pumpEventQueue();
+
+    expect(container.read(reviewedStoreProvider).done, isEmpty,
+        reason: 'the in-flight load must not overwrite clear()');
   });
 
   // TODO(D2): port the two remaining reviewed.test.ts cases once the send

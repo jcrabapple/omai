@@ -15,6 +15,7 @@ Versions pinned exactly in `pubspec.yaml`.
 | `shared_preferences` | Non-secret settings: connection list, theme, drafts index. |
 | `flutter_markdown_plus` | Markdown rendering for assistant messages. Maintained fork of the archived `flutter_markdown`; pinned to the exact version so rendering stays reproducible. |
 | `mocktail` (dev) | Mocks for notifier and client tests. |
+| `fake_async` (dev) | Virtual time for polling and timer tests. Already in the graph via `flutter_test`; declared directly so the import is lint-clean. |
 
 ## Layout
 

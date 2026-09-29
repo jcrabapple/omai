@@ -80,6 +80,10 @@ class SessionsStore extends Notifier<SessionsState> {
   int _generation = 0;
   Timer? _timer;
 
+  /// Whether the UI asked for polling; a connection change restarts the
+  /// timer instead of losing it.
+  bool _polling = false;
+
   /// Connection id the current list belongs to; null until the first build,
   /// '' when signed out.
   String? _connId;
@@ -109,6 +113,12 @@ class SessionsStore extends Notifier<SessionsState> {
       _timer?.cancel();
       _timer = null;
       _lastTodoRefresh.clear();
+      // Polling survives connection switches: rearm the timer for the new
+      // connection (the immediate refresh happens below).
+      if (_polling) {
+        final interval = ref.read(sessionsPollIntervalProvider);
+        _timer = Timer.periodic(interval, (_) => refresh());
+      }
       Future<void>.microtask(() => refresh());
       return const SessionsState();
     }
@@ -218,13 +228,18 @@ class SessionsStore extends Notifier<SessionsState> {
   /// Start polling (and refresh immediately). The UI calls this when the app
   /// comes to the foreground, [stopPolling] when it leaves.
   void startPolling() {
-    if (_timer != null) return;
+    if (_timer != null) {
+      _polling = true;
+      return;
+    }
+    _polling = true;
     unawaited(Future<void>.microtask(() => refresh()));
     final interval = ref.read(sessionsPollIntervalProvider);
     _timer = Timer.periodic(interval, (_) => refresh());
   }
 
   void stopPolling() {
+    _polling = false;
     _timer?.cancel();
     _timer = null;
   }
@@ -242,7 +257,7 @@ final sessionGroupsProvider = Provider<SessionGroups>((ref) {
   return groupSessions(
     sessions.live,
     sessions.saved,
-    DateTime.now(),
+    ref.watch(sessionsClockProvider)(),
     sessions.todoActive,
     needsReview,
   );

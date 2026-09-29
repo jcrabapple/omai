@@ -2,6 +2,7 @@
 // web/src/lib/state/__tests__/stores.test.ts, plus the stale-first rule.
 import 'dart:convert';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -13,6 +14,7 @@ import 'package:ohmypi/state/connection_notifier.dart';
 import 'package:ohmypi/state/connection_store.dart';
 import 'package:ohmypi/state/reviewed_store.dart';
 import 'package:ohmypi/state/sessions_store.dart';
+import 'package:ohmypi/state/grouping.dart';
 
 class MockTokenStore extends Mock implements TokenStore {}
 
@@ -193,6 +195,87 @@ void main() {
 
     store.remove('gw-c');
     expect(store.get('gw-c'), isNull);
+  });
+  test('polling survives a connection change and stops on stopPolling',
+      () async {
+    fakeAsync((async) {
+      final c1 = const ConnectionRecord(id: 'c1', url: 'https://g', label: 'G');
+      final c2 =
+          const ConnectionRecord(id: 'c2', url: 'https://g2', label: 'G2');
+      void setActive(String id) =>
+          container.read(connectionNotifierProvider.notifier).state =
+              ConnectionState(
+                  connections: [c1, c2],
+                  activeId: id == 'c1' ? 'c1' : 'c2');
+
+      container.read(sessionsStoreProvider);
+      // A persistent listener makes Riverpod flush dependent rebuilds on
+      // the connection change instead of leaving them lazy.
+      final sub = container.listen(sessionsStoreProvider, (_, _) {});
+      async.flushMicrotasks();
+      async.elapse(const Duration(milliseconds: 5));
+      final store = container.read(sessionsStoreProvider.notifier);
+      final beforePolling = requests.length;
+
+      store.startPolling();
+      async.flushMicrotasks();
+      final afterStart = requests.length;
+      expect(afterStart, greaterThan(beforePolling));
+
+      async.elapse(const Duration(milliseconds: pollMs * 2));
+      expect(requests.length, greaterThanOrEqualTo(afterStart + 2),
+          reason: 'the periodic timer refreshes');
+
+      // Switch connections: the timer must be rearmed for the new one.
+      final beforeSwitch = requests.length;
+      setActive('c2');
+      async.elapse(const Duration(milliseconds: 5));
+      final afterSwitch = requests.length;
+      expect(afterSwitch, greaterThan(beforeSwitch),
+          reason: 'the new connection is fetched immediately');
+      async.elapse(const Duration(milliseconds: pollMs * 2));
+      expect(requests.length, greaterThanOrEqualTo(afterSwitch + 2),
+          reason: 'polling continues for the new connection');
+
+      store.stopPolling();
+      final afterStop = requests.length;
+      async.elapse(const Duration(milliseconds: pollMs * 3));
+      expect(requests.length, afterStop,
+          reason: 'stopPolling halts the timer');
+      sub.close();
+    });
+  });
+
+  test('sessionGroupsProvider groups history with the injected clock',
+      () async {
+    // "Now" for the grouping: a date far from the real wall clock, so the
+    // test only passes when the injected sessionsClockProvider is used.
+    clock.time = DateTime(2027, 9, 29, 15, 0, 0);
+    final mtime = clock.time
+            .subtract(const Duration(days: 3))
+            .millisecondsSinceEpoch /
+        1000;
+    mockClientFactory = () => MockClient((req) async => _json({
+          'live': const [],
+          'saved': [
+            {
+              'file': '/work/omp.json',
+              'mtime': mtime,
+              'sizeBytes': 10,
+              'cwdFolder': 'work',
+              'cwd': '/work',
+              'title': 'session',
+              'running': false,
+            }
+          ],
+        }));
+    container.read(sessionsStoreProvider);
+    await pumpEventQueue();
+    await container.read(sessionsStoreProvider.notifier).refresh();
+
+    final groups = container.read(sessionGroupsProvider);
+    expect(groups.history.single.key, HistoryBucketKey.week,
+        reason: 'three days before the injected now is the week bucket');
   });
 }
 

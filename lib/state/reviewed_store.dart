@@ -58,17 +58,22 @@ class ReviewedStore extends Notifier<ReviewedState> {
     _connId = ref.watch(connectionNotifierProvider
         .select((s) => s.active?.id ?? ''));
     _dirty = false;
-    // Reload whatever this connection has persisted.
-    _load();
+    // Reload whatever this connection has persisted. The connection id is
+    // captured now so an in-flight load can never mix keys across
+    // connections (or clobber a newer connection's state).
+    _load(_connId);
     return const ReviewedState();
   }
 
-  Future<void> _load() async {
-    final done = _loadSet(await _kv.get(_doneKey));
-    final needsReview = _loadSet(await _kv.get(_reviewKey));
+  Future<void> _load(String connId) async {
+    final doneKey = 'ompgw-reviewed:$connId';
+    final reviewKey = 'ompgw-needs-review:$connId';
+    final done = _loadSet(await _kv.get(doneKey));
+    final needsReview = _loadSet(await _kv.get(reviewKey));
     // The user (or a store method) already acted before the load finished:
-    // their writes win over the persisted snapshot.
-    if (!ref.mounted || _dirty) return;
+    // their writes win over the persisted snapshot. A connection switch
+    // invalidates the load too: the data belongs to the old connection.
+    if (!ref.mounted || _dirty || _connId != connId) return;
     state = ReviewedState(done: done, needsReview: needsReview);
   }
 
@@ -113,6 +118,7 @@ class ReviewedStore extends Notifier<ReviewedState> {
   }
 
   Future<void> clear() async {
+    _dirty = true;
     state = ReviewedState(done: const {}, needsReview: state.needsReview);
     await _kv.set(_doneKey, '[]');
   }

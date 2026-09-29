@@ -1,6 +1,12 @@
 // Unified diff for one file: op badge, short path, +/- counts, unified rows
 // with word-level marks. Ported from web/src/components/items/DiffBlock.svelte
 // (unified only; split view is the web desktop wide layout).
+//
+// Performance: the diff string and word marks are parsed once in
+// initState/didUpdateWidget (only when the diff string changes), never in
+// build. The expanded view is capped at steps of [_maxRows] lines with a
+// "show more" button instead of thousands of un-virtualized rows. Rows are
+// selectable and keyed for stable element matching.
 import 'package:flutter/material.dart';
 
 import '../../theme/tokens.dart';
@@ -23,10 +29,35 @@ class DiffBlock extends StatefulWidget {
 class _DiffBlockState extends State<DiffBlock> {
   bool _showAll = false;
 
+  /// How many [_maxRows] steps are currently expanded.
+  int _steps = 1;
+
+  // Cached parse results, recomputed only when the diff string changes.
+  ParsedDiff _parsed = const ParsedDiff([], 0, 0);
+  List<Map<int, Range>> _marks = const [];
+  String? _parsedFor;
+
   @override
   void initState() {
     super.initState();
     _showAll = widget.showAll;
+    _reparse();
+  }
+
+  @override
+  void didUpdateWidget(covariant DiffBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.showAll != widget.showAll) _showAll = widget.showAll;
+    _reparse();
+  }
+
+  void _reparse() {
+    if (_parsedFor != null && widget.file.diff == _parsedFor) return;
+    _parsedFor = widget.file.diff;
+    _parsed = parseOmpDiff(widget.file.diff);
+    _marks = [
+      for (final h in _parsed.hunks) rowMarks(h.lines),
+    ];
   }
 
   String get _shortPath {
@@ -38,7 +69,6 @@ class _DiffBlockState extends State<DiffBlock> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).extension<OmpTokens>()!;
     final f = widget.file;
-    final parsed = parseOmpDiff(f.diff);
 
     final String badge;
     if (f.created || f.op == 'create') {
@@ -61,14 +91,19 @@ class _DiffBlockState extends State<DiffBlock> {
 
     final rows = <Widget>[];
     var count = 0;
-    for (final h in parsed.hunks) {
-      final marks = rowMarks(h.lines);
+    final limit = _limit;
+    for (var hi = 0; hi < _parsed.hunks.length; hi++) {
+      final h = _parsed.hunks[hi];
+      final marks = _marks[hi];
       for (var i = 0; i < h.lines.length; i++) {
         final row = h.lines[i];
-        if (row.t == 'gap') {
-          if (count < _limit) rows.add(_gapRow(row.text, t));
-        } else {
-          if (count < _limit) rows.add(_codeRow(row, marks[i], t));
+        if (count < limit) {
+          final key = ValueKey<int>(count);
+          if (row.t == 'gap') {
+            rows.add(_gapRow(row.text, t, key));
+          } else {
+            rows.add(_codeRow(row, marks[i], t, key));
+          }
         }
         count += 1;
       }
@@ -129,7 +164,7 @@ class _DiffBlockState extends State<DiffBlock> {
               ],
             ),
           ),
-          if (parsed.hunks.isEmpty)
+          if (_parsed.hunks.isEmpty)
             Padding(
               padding: const EdgeInsets.all(OmpMetrics.s3),
               child: Text('Empty file',
@@ -138,14 +173,16 @@ class _DiffBlockState extends State<DiffBlock> {
           else
             Padding(
               padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
-              child: Column(children: rows),
+              child: SelectionArea(child: Column(children: rows)),
             ),
           if (hidden > 0)
             Padding(
               padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
               child: TextButton(
-                onPressed: () => setState(() => _showAll = true),
-                child: Text('Show all $count lines'),
+                key: const ValueKey('diff-show-more'),
+                onPressed: () => setState(() => _steps += 1),
+                child: Text(
+                    'Show ${hidden > _maxRows ? _maxRows : hidden} more lines'),
               ),
             ),
         ],
@@ -153,10 +190,11 @@ class _DiffBlockState extends State<DiffBlock> {
     );
   }
 
-  int get _limit => _showAll ? 1 << 31 : _maxRows;
+  int get _limit => _showAll ? 1 << 31 : _maxRows * _steps;
 
-  Widget _gapRow(String text, OmpTokens t) {
+  Widget _gapRow(String text, OmpTokens t, Key key) {
     return Padding(
+      key: key,
       padding: const EdgeInsets.symmetric(horizontal: OmpMetrics.s2),
       child: Text(
         text.isEmpty ? '...' : '... $text',
@@ -166,7 +204,7 @@ class _DiffBlockState extends State<DiffBlock> {
     );
   }
 
-  Widget _codeRow(DiffRow row, Range? mark, OmpTokens t) {
+  Widget _codeRow(DiffRow row, Range? mark, OmpTokens t, Key key) {
     final Color bg;
     if (row.t == 'add') {
       bg = t.ok.withValues(alpha: 0.08);
@@ -201,6 +239,7 @@ class _DiffBlockState extends State<DiffBlock> {
       spans.add(TextSpan(text: row.text));
     }
     return Container(
+      key: key,
       color: bg,
       padding: const EdgeInsets.symmetric(horizontal: OmpMetrics.s2),
       child: Row(

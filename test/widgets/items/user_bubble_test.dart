@@ -66,9 +66,45 @@ void main() {
 
   testWidgets('long press opens copy and inspect actions', (tester) async {
     await pumpOmp(tester, UserBubble(item: item()));
-    await tester.longPress(find.text('hello'));
+    // Press on the bubble padding: the SelectionArea owns long-presses on
+    // the text itself.
+    final text = tester.getRect(find.text('hello'));
+    await tester.longPressAt(Offset(text.left - 6, text.center.dy));
     await tester.pumpAndSettle();
     expect(find.text('Copy'), findsOneWidget);
     expect(find.text('Inspect'), findsOneWidget);
+  });
+
+  testWidgets('the text is selectable', (tester) async {
+    await pumpOmp(tester, UserBubble(item: item()));
+    expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('a short message hugs its content instead of stretching to 85%',
+      (tester) async {
+    await pumpOmp(tester, UserBubble(item: item(text: 'hi')));
+    final bubble = tester.getRect(find
+        .descendant(
+          of: find.byType(UserBubble),
+          matching: find.byWidgetPredicate(
+              (w) => w is Container && w.decoration is BoxDecoration),
+        )
+        .first);
+    // 800dp test surface: the old FractionallySizedBox forced 85% (680dp).
+    expect(bubble.width, lessThan(800 * 0.4));
+    expect(bubble.width, greaterThan(0));
+  });
+
+  testWidgets('a long message still caps at 85% of the available width',
+      (tester) async {
+    await pumpOmp(
+        tester,
+        UserBubble(
+            item: item(
+                text:
+                    'a fairly long message that should wrap and eventually hit the width cap')));
+    final bubble = tester.getRect(find.text(
+        'a fairly long message that should wrap and eventually hit the width cap'));
+    expect(bubble.width, lessThanOrEqualTo(640 * 0.85 + 1));
   });
 }

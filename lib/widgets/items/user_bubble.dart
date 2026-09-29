@@ -42,9 +42,11 @@ class UserBubble extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (item.text.isNotEmpty)
-            Text(
-              item.text,
-              style: textTheme.bodyMedium?.copyWith(color: cs.onSurface),
+            SelectionArea(
+              child: Text(
+                item.text,
+                style: textTheme.bodyMedium?.copyWith(color: cs.onSurface),
+              ),
             ),
           if (item.images > 0)
             Padding(
@@ -77,13 +79,22 @@ class UserBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            FractionallySizedBox(
-              widthFactor: 0.85,
-              child: MessageActions(
-                text: item.text,
-                raw: item.raw,
-                label: 'Your message',
-                child: bubble,
+            // Short messages hug their content: cap the width at 85% of the
+            // available space instead of forcing exactly 85%.
+            LayoutBuilder(
+              builder: (context, constraints) => Align(
+                alignment: Alignment.centerRight,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth * 0.85,
+                  ),
+                  child: MessageActions(
+                    text: item.text,
+                    raw: item.raw,
+                    label: 'Your message',
+                    child: bubble,
+                  ),
+                ),
               ),
             ),
             if (item.failed == true)

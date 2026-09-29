@@ -52,7 +52,7 @@ class _ToolOutputState extends State<ToolOutput> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final f in w.files!) ...[
-            DiffBlock(file: f),
+            DiffBlock(key: ValueKey<String>('diff:${f.path}'), file: f),
             const SizedBox(height: OmpMetrics.s2),
           ],
         ],

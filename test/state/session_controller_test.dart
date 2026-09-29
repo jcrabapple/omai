@@ -2,6 +2,7 @@
 // "running never sticks" paths, gone, 401 sign-out, dispose stops the
 // stream. Uses the existing stream fakes (test/stream/fakes.dart) and an
 // http MockClient.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,9 +10,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:ohmypi/api/client.dart';
+import 'package:ohmypi/api/models.dart';
 import 'package:ohmypi/state/connection_notifier.dart';
 import 'package:ohmypi/state/connection_store.dart';
 import 'package:ohmypi/state/session_controller.dart';
+import 'package:ohmypi/state/sessions_store.dart';
 import 'package:ohmypi/stream/session_stream.dart';
 
 import '../stream/fakes.dart';
@@ -63,12 +66,18 @@ class FakeGateway {
   int status;
   final List<String> paths = [];
 
+  /// Test seam: hold /responses to /messages until completed (mid-open
+  /// dispose tests).
+  Completer<void>? messagesGate;
+
   http.Client client() => MockClient((req) async {
         paths.add(req.url.path + (req.url.queryParameters.isEmpty
             ? ''
             : '?${req.url.query}'));
         if (status != 200) return _json({'error': 'nope'}, status: status);
         if (req.url.path.endsWith('/messages')) {
+          final gate = messagesGate;
+          if (gate != null) await gate.future;
           return _json({'messages': messages});
         }
         if (req.url.path.endsWith('/state')) {
@@ -207,6 +216,8 @@ void main() {
 
     expect(container.read(provider).running, isFalse,
         reason: 'the resync snapshot resets the turn state');
+    expect(container.read(provider).activity, isNull,
+        reason: 'a resync that ends the turn also clears the activity line');
     expect(container.read(provider).transcript.items, isNotEmpty);
   });
 
@@ -227,6 +238,8 @@ void main() {
 
     expect(container.read(provider).running, isFalse,
         reason: 'isStreaming:false in fresh info always clears running');
+    expect(container.read(provider).activity, isNull,
+        reason: 'fresh info ending the turn clears the activity line');
     expect(container.read(provider).info?.isStreaming, isFalse);
   });
 
@@ -239,10 +252,14 @@ void main() {
     addTearDown(sub.close);
     await pumpEventQueue();
 
+    hub.current.frame(1, {'type': 'agent_start'});
+    expect(container.read(provider).activity, isNotNull);
     hub.current.serverClose(4404);
     await pumpEventQueue();
 
     expect(container.read(provider).phase, SessionPhase.gone);
+    expect(container.read(provider).activity, isNull,
+        reason: 'going away clears the activity line');
   });
 
   test('a 404 on open puts the session in the gone phase', () async {
@@ -301,11 +318,133 @@ void main() {
     expect(sock.closed, isFalse);
 
     sub.close();
-    // The provider is keep-alive by default; disposing the container
-    // disposes the controller, which must stop the stream.
+    // The provider auto-disposes with its last listener; disposing the
+    // controller must stop the stream (see also the autoDispose tests below).
     container.dispose();
     await pumpEventQueue();
     expect(sock.closed, isTrue, reason: 'disposing the controller closes the socket');
+  });
+
+  test('autoDispose: the last listener leaving closes the socket and cancels timers',
+      () async {
+    final gateway = FakeGateway(infoJson: infoJson());
+    final hub = SocketHub();
+    final container = makeContainer(gateway: gateway, hub: hub);
+    final provider = sessionControllerProvider('abc');
+    final sub = container.listen(provider, (previous, next) {});
+    await pumpEventQueue();
+    final sock = hub.current;
+    final statsAfterOpen =
+        gateway.paths.where((p) => p.endsWith('/stats')).length;
+
+    // A turn ends right before the user leaves: the post-turn stats timer
+    // is armed.
+    hub.current.frame(1, {'type': 'agent_start'});
+    hub.current.frame(2, {'type': 'agent_end'});
+
+    sub.close();
+    await pumpEventQueue();
+    expect(sock.closed, isTrue,
+        reason: 'autoDispose tears the socket down with the last listener');
+
+    // The 600ms post-turn timer must not fire in the background.
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
+        statsAfterOpen,
+        reason: 'no stats refresh after the provider is disposed');
+  });
+
+  test('autoDispose: reopening after a failed open retries with a fresh instance',
+      () async {
+    final gateway = FakeGateway(status: 500);
+    final hub = SocketHub();
+    final container = makeContainer(gateway: gateway, hub: hub);
+    final provider = sessionControllerProvider('abc');
+    final sub = container.listen(provider, (previous, next) {});
+    await pumpEventQueue();
+    expect(container.read(provider).phase, SessionPhase.error);
+
+    sub.close();
+    await pumpEventQueue();
+    gateway.status = 200;
+    gateway.infoJson = infoJson(lastEventSeq: 0);
+    final sub2 = container.listen(provider, (previous, next) {});
+    addTearDown(sub2.close);
+    await pumpEventQueue();
+
+    expect(container.read(provider).phase, SessionPhase.ready,
+        reason: 'a fresh open replaces the cached error');
+    expect(hub.sockets, isNotEmpty,
+        reason: 'the retry opens a socket for the session');
+  });
+
+  test('a dispose while the open is in flight opens no socket and does not throw',
+      () async {
+    final gateway = FakeGateway()..messagesGate = Completer<void>();
+    final hub = SocketHub();
+    final container = makeContainer(gateway: gateway, hub: hub);
+    final provider = sessionControllerProvider('abc');
+    final sub = container.listen(provider, (previous, next) {});
+    await pumpEventQueue();
+    expect(hub.sockets, isEmpty, reason: 'still fetching history');
+
+    sub.close();
+    await pumpEventQueue();
+    gateway.messagesGate!.complete();
+    await pumpEventQueue();
+
+    expect(hub.sockets, isEmpty,
+        reason: 'a disposed controller never opens a socket');
+  });
+
+  test('pause cancels the post-turn stats timer; resume runs it', () async {
+    final gateway = FakeGateway(infoJson: infoJson());
+    final hub = SocketHub();
+    final container = makeContainer(gateway: gateway, hub: hub);
+    final provider = sessionControllerProvider('abc');
+    final sub = container.listen(provider, (previous, next) {});
+    addTearDown(sub.close);
+    await pumpEventQueue();
+    final statsAfterOpen =
+        gateway.paths.where((p) => p.endsWith('/stats')).length;
+
+    hub.current.frame(1, {'type': 'agent_start'});
+    hub.current.frame(2, {'type': 'agent_end'});
+    await pumpEventQueue();
+
+    container.read(provider.notifier).pause();
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
+        statsAfterOpen,
+        reason: 'a paused session makes no background REST calls');
+
+    container.read(provider.notifier).resume();
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
+        greaterThan(statsAfterOpen),
+        reason: 'resume runs the stats refresh that was pending');
+  });
+
+  test('a 404 on open also removes the session from the sessions store',
+      () async {
+    final gateway = FakeGateway(status: 404);
+    final hub = SocketHub();
+    final container = makeContainer(gateway: gateway, hub: hub);
+    container.read(sessionsStoreProvider.notifier);
+    await pumpEventQueue();
+    container
+        .read(sessionsStoreProvider.notifier)
+        .patch(SessionInfo.fromJson({'gwId': 'abc', 'cwd': '/work'}));
+    expect(container.read(sessionsStoreProvider).live, isNotEmpty);
+
+    final provider = sessionControllerProvider('abc');
+    final sub = container.listen(provider, (previous, next) {});
+    addTearDown(sub.close);
+    await pumpEventQueue();
+
+    expect(container.read(provider).phase, SessionPhase.gone);
+    expect(container.read(sessionsStoreProvider).live, isEmpty,
+        reason: 'a gone session disappears from the rail immediately');
   });
 
   test('pause and resume are forwarded to the stream', () async {

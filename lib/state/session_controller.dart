@@ -166,8 +166,8 @@ final sessionEnvProvider = FutureProvider<SessionEnv>((ref) async {
   );
 });
 
-final sessionControllerProvider = NotifierProvider.family<SessionController,
-    SessionState, String>(SessionController.new);
+final sessionControllerProvider = NotifierProvider.autoDispose.family<
+    SessionController, SessionState, String>(SessionController.new);
 
 /// One open session, keyed by gateway session id. The id arrives through the
 /// constructor (Riverpod 3 family without codegen); `build` kicks off the
@@ -221,6 +221,8 @@ class SessionController extends Notifier<SessionState> {
       if (gen != _generation || !ref.mounted) return;
       if (e is GatewayError && e.status == 404) {
         state = state.copyWith(phase: SessionPhase.gone, clearError: true);
+        // The session is gone: take it out of the rail immediately.
+        ref.read(sessionsStoreProvider.notifier).remove(gwId);
         return;
       }
       if (e is AuthError) {
@@ -275,13 +277,15 @@ class SessionController extends Notifier<SessionState> {
         },
         onResync: (_) => unawaited(_resync(env, gwId, gen)),
         onSignedOut: () {
+          if (!ref.mounted) return;
           // Close code 4401: the token was rejected. Sign out.
           unawaited(
               ref.read(connectionNotifierProvider.notifier).signOut());
         },
         onGone: () {
-          if (gen != _generation) return;
-          state = state.copyWith(phase: SessionPhase.gone, clearError: true);
+          if (gen != _generation || !ref.mounted) return;
+          state = state.copyWith(
+              phase: SessionPhase.gone, clearError: true, clearActivity: true);
           ref.read(sessionsStoreProvider.notifier).remove(gwId);
         },
       ),
@@ -352,6 +356,10 @@ class SessionController extends Notifier<SessionState> {
   void _flush() {
     _flushScheduled = false;
     if (_pendingEvents.isEmpty) return;
+    if (!ref.mounted) {
+      _pendingEvents.clear();
+      return;
+    }
     final batch = _pendingEvents.toList();
     _pendingEvents.clear();
     var transcript = state.transcript;
@@ -403,18 +411,24 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  bool _statsPending = false;
+
   void _scheduleStats() {
     _statsTimer?.cancel();
+    _statsPending = true;
     _statsTimer = Timer(const Duration(milliseconds: 600), () {
+      _statsTimer = null;
+      _statsPending = false;
       unawaited(_refreshAfterTurn());
     });
   }
 
   Future<void> _refreshAfterTurn() async {
     if (!ref.mounted) return;
+    final gen = _generation; // captured before the await
     try {
       final env = await ref.read(sessionEnvProvider.future);
-      final gen = _generation;
+      if (!ref.mounted || gen != _generation) return;
       await Future.wait<void>([
         _refreshStats(env, gwId, gen),
         _refreshInfo(env, gwId, gen),
@@ -490,20 +504,36 @@ class SessionController extends Notifier<SessionState> {
   /// isStreaming:false always clears `running` so it can never stick.
   void _setInfo(SessionInfo info) {
     var transcript = state.transcript;
+    final shouldClear = !info.isStreaming && state.activity != null;
     if (!info.isStreaming && transcript.running) {
       transcript = _withRunning(transcript, false);
     }
-    state = state.copyWith(info: info, transcript: transcript);
+    state = state.copyWith(
+      info: info,
+      transcript: transcript,
+      clearActivity: shouldClear,
+    );
     ref.read(sessionsStoreProvider.notifier).patch(info);
   }
 
   // ------------------------------------------------------------ public API
 
   /// App went to the background: drop the socket and wait.
-  void pause() => _stream?.pause();
+  void pause() {
+    _statsTimer?.cancel();
+    _statsTimer = null;
+    _stream?.pause();
+  }
 
   /// App came back: reconnect, resyncing when it was away too long.
-  void resume() => _stream?.resume();
+  void resume() {
+    _stream?.resume();
+    // A stats refresh may have been pending when we paused; run it now.
+    if (_statsTimer == null && _statsPending) {
+      _statsPending = false;
+      _scheduleStats();
+    }
+  }
 
   /// Refetch info now (e.g. pull-to-refresh on the session screen).
   Future<void> refreshInfo() async {
@@ -538,6 +568,8 @@ class SessionController extends Notifier<SessionState> {
     _generation++;
     _statsTimer?.cancel();
     _statsTimer = null;
+    _statsPending = false;
+    _flushScheduled = false;
     _pendingEvents.clear();
     _stream?.stop();
     _stream = null;

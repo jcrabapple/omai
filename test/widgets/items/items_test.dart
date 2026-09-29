@@ -140,6 +140,11 @@ void main() {
           findsOneWidget);
       handle.dispose();
     });
+
+    testWidgets('rows are keyed by the tool id', (tester) async {
+      await pumpOmp(tester, ToolGroup(tools: [tool()]));
+      expect(find.byKey(const ValueKey('tool-1')), findsOneWidget);
+    });
   });
 
   group('ToolOutput', () {
@@ -281,6 +286,56 @@ void main() {
       expect(marked, isNotEmpty);
       expect(marked.any((s) => s.text!.contains('2')), isTrue);
     });
+
+    testWidgets('rows are selectable', (tester) async {
+      await pumpOmp(
+        tester,
+        const DiffBlock(
+          file: FileChange(
+              path: 'a.dart',
+              op: 'update',
+              diff: diff,
+              adds: 2,
+              dels: 1,
+              created: false),
+        ),
+      );
+      expect(find.byType(SelectionArea), findsOneWidget);
+    });
+
+    testWidgets('large diffs render in 400-row steps with show more',
+        (tester) async {
+      final big = List.generate(900, (i) => ' ${i + 1}|L$i').join('\n');
+      await pumpOmp(
+        tester,
+        DiffBlock(
+          file: FileChange(
+              path: 'big.dart',
+              op: 'update',
+              diff: big,
+              adds: 0,
+              dels: 0,
+              created: false),
+        ),
+      );
+      // First step: 400 rows.
+      expect(find.textContaining('L399'), findsOneWidget);
+      expect(find.textContaining('L400'), findsNothing);
+      expect(find.text('Show 400 more lines'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Show 400 more lines'));
+      await tester.tap(find.text('Show 400 more lines'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('L799'), findsOneWidget);
+      expect(find.textContaining('L899'), findsNothing);
+      expect(find.text('Show 100 more lines'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Show 100 more lines'));
+      await tester.tap(find.text('Show 100 more lines'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('L899'), findsOneWidget);
+      expect(find.textContaining('Show'), findsNothing);
+    });
   });
 
   group('NoticeLine', () {
@@ -346,6 +401,20 @@ void main() {
       );
       expect(find.text('Command output'), findsOneWidget);
     });
+
+    testWidgets('caps at 200 lines with a show-all button', (tester) async {
+      final text = List.generate(300, (i) => 'line $i').join('\n');
+      await pumpOmp(
+        tester,
+        CommandCard(item: CommandItem(id: 'c3', text: text)),
+      );
+      expect(find.textContaining('line 199'), findsOneWidget);
+      expect(find.textContaining('line 250'), findsNothing);
+      expect(find.text('Show all 300 lines'), findsOneWidget);
+      await tester.tap(find.text('Show all 300 lines'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('line 299'), findsOneWidget);
+    });
   });
 
   group('SkillChip', () {
@@ -360,6 +429,9 @@ void main() {
       await tester.tap(find.text('Skill: deploy'));
       await tester.pumpAndSettle();
       expect(find.text('THE PROMPT'), findsOneWidget);
+      expect(find.descendant(
+          of: find.byType(SkillChip),
+          matching: find.byType(SelectionArea)), findsOneWidget);
       await tester.tap(find.text('Skill: deploy'));
       await tester.pumpAndSettle();
       expect(find.text('THE PROMPT'), findsNothing);

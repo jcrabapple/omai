@@ -83,4 +83,41 @@ void main() {
           reason: 'preset ${preset.name}');
     }
   });
+
+  testWidgets('streaming deltas re-render markdown at most once per 100ms',
+      (tester) async {
+    var now = DateTime(2026);
+    final seen = <String>{};
+    String rendered() =>
+        tester.widget<MarkdownBody>(find.byType(MarkdownBody).first).data;
+
+    await pumpOmp(
+        tester, AssistantMessage(item: item(text: 'chunk 0', streaming: true), clockNow: () => now));
+    seen.add(rendered());
+
+    // 50 rapid updates inside one throttle window: the markdown subtree
+    // must not rebuild for each.
+    for (var i = 1; i <= 50; i++) {
+      await pumpOmp(
+          tester,
+          AssistantMessage(
+              item: item(text: 'chunk $i', streaming: true),
+              clockNow: () => now));
+      seen.add(rendered());
+    }
+    expect(seen.length, lessThanOrEqualTo(2),
+        reason: '50 updates within 100ms are throttled');
+    expect(seen.contains('chunk 50'), isFalse);
+
+    // When the window passes, the deferred render shows the latest text.
+    now = now.add(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(rendered(), 'chunk 50');
+
+    // Streaming ends: the final text always renders.
+    await pumpOmp(
+        tester,
+        AssistantMessage(item: item(text: 'final text'), clockNow: () => now));
+    expect(rendered(), 'final text');
+  });
 }

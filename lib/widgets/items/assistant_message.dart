@@ -2,12 +2,22 @@
 // blocks with horizontal scroll, no syntax highlighting in v1. Ported from
 // web/src/components/items/AssistantMessage.svelte (web's highlight.js code
 // headers and copy buttons arrive with a later task).
+//
+// Performance: streaming deltas re-render markdown at most once per
+// [markdownThrottle]; the style sheet is memoized per theme tokens so ticks
+// never rebuild it. The final text always renders once streaming ends.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../theme/tokens.dart';
 import '../../transcript/items.dart';
 import 'message_actions.dart';
+
+/// Render window while streaming: at most one markdown swap per tick.
+@visibleForTesting
+const Duration markdownThrottle = Duration(milliseconds: 100);
 
 MarkdownStyleSheet _sheet(BuildContext context, OmpTokens t) {
   final base = Theme.of(context).textTheme;
@@ -38,17 +48,86 @@ MarkdownStyleSheet _sheet(BuildContext context, OmpTokens t) {
   );
 }
 
-class AssistantMessage extends StatelessWidget {
+class AssistantMessage extends StatefulWidget {
   final AssistantItem item;
 
   /// Called when the user taps a link. v1 opens nothing (TODO: in-app viewer).
   final void Function(String href)? onLinkTap;
 
-  const AssistantMessage({super.key, required this.item, this.onLinkTap});
+  /// Test seam: the clock used for the streaming render throttle.
+  final DateTime Function()? clockNow;
+
+  const AssistantMessage({
+    super.key,
+    required this.item,
+    this.onLinkTap,
+    this.clockNow,
+  });
+
+  @override
+  State<AssistantMessage> createState() => _AssistantMessageState();
+}
+
+class _AssistantMessageState extends State<AssistantMessage> {
+  OmpTokens? _cachedFor;
+  MarkdownStyleSheet? _cachedSheet;
+
+  // The text currently on screen and when it was last swapped.
+  String _shown = '';
+  DateTime _lastRender = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _pending;
+
+  DateTime get _now =>
+      widget.clockNow?.call() ?? DateTime.fromMillisecondsSinceEpoch(0);
+
+  MarkdownStyleSheet _sheetFor(BuildContext context, OmpTokens t) {
+    if (identical(_cachedFor, t) && _cachedSheet != null) return _cachedSheet!;
+    _cachedFor = t;
+    _cachedSheet = _sheet(context, t);
+    return _cachedSheet!;
+  }
+
+  /// Throttled text: while streaming, at most one swap per
+  /// [markdownThrottle]; once streaming ends, always the final text.
+  String _throttledText() {
+    final text = widget.item.text;
+    if (!widget.item.streaming) {
+      _pending?.cancel();
+      _pending = null;
+      _shown = text;
+      _lastRender = _now;
+      return _shown;
+    }
+    if (text == _shown) return _shown;
+    final now = _now;
+    if (now.difference(_lastRender) >= markdownThrottle) {
+      _pending?.cancel();
+      _pending = null;
+      _shown = text;
+      _lastRender = now;
+      return _shown;
+    }
+    _pending ??= Timer(markdownThrottle, () {
+      _pending = null;
+      if (!mounted) return;
+      setState(() {
+        _shown = widget.item.text;
+        _lastRender = _now;
+      });
+    });
+    return _shown;
+  }
+
+  @override
+  void dispose() {
+    _pending?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).extension<OmpTokens>()!;
+    final item = widget.item;
     final stopped = item.stopReason == 'aborted' && !item.streaming;
     final visible = item.streaming ||
         item.text.trim().isNotEmpty ||
@@ -66,13 +145,13 @@ class AssistantMessage extends StatelessWidget {
         children: [
           SelectionArea(
             child: MarkdownBody(
-              data: item.text,
+              data: _throttledText(),
               selectable: false,
-              styleSheet: _sheet(context, t),
+              styleSheet: _sheetFor(context, t),
               onTapLink: (text, href, title) {
                 // TODO(D2): open links in an in-app viewer. Deliberately a
                 // no-op so taps never crash before that lands.
-                onLinkTap?.call(href ?? text);
+                widget.onLinkTap?.call(href ?? text);
               },
             ),
           ),
