@@ -11,8 +11,11 @@ PORT=9325
 case "${1:-status}" in
   start)
     if systemctl --user is-active --quiet "$UNIT"; then echo "already running"; exit 0; fi
+    # Restart=always: other sessions testing the gateway have been seen to
+    # SIGTERM every test uvicorn at once; a clean exit must not leave the
+    # phone staring at a dead port.
     systemd-run --user --unit="$UNIT" --collect \
-      -p WorkingDirectory="$GW" \
+      -p WorkingDirectory="$GW" -p Restart=always -p RestartSec=2 \
       -E PATH="$HOME/.bun/bin:/usr/local/bin:/usr/bin" \
       "$GW/.venv/bin/uvicorn" gateway.main:app --host 127.0.0.1 --port "$PORT" \
       --no-access-log --ws-ping-interval 20 --ws-ping-timeout 20
