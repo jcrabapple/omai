@@ -1057,4 +1057,155 @@ void main() {
       expect(tools.map((t) => t.files).toString(), isNot(contains('xd://')));
     });
   });
+
+  // Regression tests for Gemini review findings: TS `||` truthiness must not
+  // become Dart `??` (empty strings are values, not absent).
+  group('truthiness regressions', () {
+    test('tool raw call is the toolCall block, not the split', () {
+      final s = reduce(
+          emptyTranscript(),
+          ev({
+            'type': 'message_start',
+            'messageId': 'm1',
+            'message': {
+              'role': 'assistant',
+              'content': [
+                {
+                  'type': 'toolCall',
+                  'id': 'tc1',
+                  'name': 'bash',
+                  'arguments': {'command': 'ls'},
+                }
+              ],
+            },
+          }));
+      final tool = s.items.whereType<ToolItem>().single;
+      final call = (tool.raw as Map)['call'];
+      expect(call, isA<ToolCallBlock>());
+      final block = call as ToolCallBlock;
+      expect(block.id, 'tc1');
+      expect(block.name, 'bash');
+      expect(block.arguments, {'command': 'ls'});
+    });
+
+    test('an errored result clears a tool that previously had files', () {
+      var s = reduce(
+          emptyTranscript(),
+          ev({
+            'type': 'tool_execution_start',
+            'toolCallId': 't1',
+            'toolName': 'write',
+            'args': {'path': 'a.py', 'content': 'x = 1\n'},
+          }));
+      expect((s.items.single as ToolItem).files, isNull);
+      s = reduce(
+          s,
+          ev({
+            'type': 'tool_execution_end',
+            'toolCallId': 't1',
+            'result': {'content': 'ok', 'details': {'path': 'a.py', 'diff': '+1|x = 1\n'}},
+          }));
+      expect((s.items.single as ToolItem).files, isNotNull);
+      // An error result un-does the change: files must be cleared, not kept.
+      s = reduce(
+          s,
+          ev({
+            'type': 'tool_execution_end',
+            'toolCallId': 't1',
+            'isError': true,
+            'result': {'content': 'boom'},
+          }));
+      expect((s.items.single as ToolItem).files, isNull);
+    });
+
+    test('copyWith can clear nullable fields', () {
+      const files = [FileChange(path: 'a', op: 'write', diff: '', adds: 0, dels: 0, created: true)];
+      final tool = ToolItem(
+              id: 'tool:t', toolCallId: 't', toolName: 'write', summary: '', output: '', status: 'done')
+          .copyWith(files: files);
+      expect(tool.copyWith(files: null).files, isNull);
+      expect(tool.copyWith(files: null).status, 'done');
+      final user = const UserItem(id: 'u', text: 'hi', images: 0, pending: false, failed: true)
+          .copyWith(failed: null);
+      expect(user.failed, isNull);
+      final notice = const NoticeItem(id: 'n', level: 'info', text: 'x', tag: 'retry', active: true)
+          .copyWith(tag: null, active: null);
+      expect(notice.tag, isNull);
+      expect(notice.active, isNull);
+      final thinking = const ThinkingItem(id: 'th', text: 't', streaming: false, startedAt: 1, endedAt: 2)
+          .copyWith(startedAt: null, endedAt: null);
+      expect(thinking.startedAt, isNull);
+      expect(thinking.endedAt, isNull);
+    });
+
+    test('an empty messageId falls back instead of keying on id:', () {
+      final s = reduce(
+          emptyTranscript(),
+          ev({
+            'type': 'message_start',
+            'messageId': '',
+            'message': {
+              'role': 'assistant',
+              'content': 'hello',
+            },
+          }));
+      expect(s.items.single.messageKey, 'assistant:anon');
+    });
+
+    test('notify with an empty message uses the title', () {
+      final s = reduce(
+          emptyTranscript(),
+          ev({
+            'type': 'extension_ui_request',
+            'method': 'notify',
+            'id': 'u1',
+            'message': '',
+            'title': 'Fallback title',
+          }));
+      expect((s.items.single as NoticeItem).text, 'Fallback title');
+    });
+
+    test('an empty intent on a later patch does not erase the previous one', () {
+      var s = reduce(
+          emptyTranscript(),
+          ev({
+            'type': 'tool_execution_start',
+            'toolCallId': 't9',
+            'toolName': 'bash',
+            'args': {'command': 'ls'},
+            'intent': 'Listing files',
+          }));
+      s = reduce(
+          s,
+          ev({
+            'type': 'tool_execution_update',
+            'toolCallId': 't9',
+            'toolName': 'bash',
+            'intent': '',
+          }));
+      expect((s.items.single as ToolItem).intent, 'Listing files');
+    });
+
+    test('empty error strings on compaction and retry events count as absent', () {
+      var s = reduce(
+          emptyTranscript(),
+          ev({'type': 'auto_compaction_start', 'id': 'c1'}));
+      s = reduce(s, ev({'type': 'auto_compaction_end', 'errorMessage': ''}));
+      final compaction = s.items.whereType<NoticeItem>().last;
+      expect(compaction.text, 'Context compacted');
+      expect(compaction.level, 'info');
+
+      s = reduce(s, ev({'type': 'auto_retry_start', 'attempt': 2, 'errorMessage': ''}));
+      expect((s.items.whereType<NoticeItem>().last).text, 'Retrying, attempt 2');
+
+      s = reduce(s, ev({'type': 'auto_retry_end', 'success': false, 'finalError': ''}));
+      expect((s.items.whereType<NoticeItem>().last).text, 'Gave up retrying');
+      expect((s.items.whereType<NoticeItem>().last).level, 'error');
+    });
+
+    test('CommandItem.normalized includes messageKey', () {
+      const item = CommandItem(id: 'c:1', messageKey: 'user:id:abc', text: 'out');
+      expect(item.normalized()['messageKey'], 'user:id:abc');
+    });
+  });
 }

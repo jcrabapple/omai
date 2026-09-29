@@ -192,7 +192,7 @@ String resultText(Object? r) {
 String _keyOf(Map<String, Object?> m, String? messageId, String fallback) {
   final ts = m['timestamp'];
   if (ts is num) return '${m['role']}:${ts.toInt()}';
-  return '${m['role']}:${messageId != null ? 'id:$messageId' : fallback}';
+  return '${m['role']}:${messageId != null && messageId.isNotEmpty ? 'id:$messageId' : fallback}';
 }
 
 const List<String> _summaryKeys = ['command', 'path', 'file_path', 'pattern', 'query', 'url'];
@@ -421,7 +421,7 @@ void _applyAssistant(
       details: null,
       startedAt: null,
       endedAt: null,
-      call: b,
+      call: call,
       result: null,
     ));
   }
@@ -532,7 +532,10 @@ void _upsertTool(_Work d, _ToolPatch p) {
   final n = _normArgs(p.args);
   final newArgs = n.args;
   final args = (newArgs != null && newArgs.isNotEmpty) ? newArgs : (prev?.args ?? newArgs);
-  final intent = p.intent ?? n.intent ?? prev?.intent;
+  // TS: p.intent || n.intent || prev?.intent — empty strings fall through.
+  String? intentOf(String? a, String? b, String? c) =>
+      a != null && a.isNotEmpty ? a : (b != null && b.isNotEmpty ? b : c);
+  final intent = intentOf(p.intent, n.intent, prev?.intent);
   // A replayed start or update must not reopen a tool that already finished.
   final finished = prev != null && prev.status != 'running';
   final status = p.status ?? (finished ? prev.status : 'running');
@@ -752,7 +755,9 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
         return _close(d);
       }
       if (event.raw['method'] == 'notify') {
-        final text = strOf(event.raw, 'message') ?? event.title ?? '';
+        // TS: ev.message || ev.title — an empty message falls through to title.
+        final message = strOf(event.raw, 'message');
+        final text = (message != null && message.isNotEmpty) ? message : (event.title ?? '');
         final key = 'ui:${event.raw['id'] ?? ''}';
         if (text.isEmpty || state.items.any((it) => it.messageKey == key)) return state;
         final d = _open(state);
@@ -799,16 +804,20 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       ));
       return _close(d);
     case 'auto_compaction_end':
-      final text = event.errorMessage != null
+      // TS: ev.errorMessage ? ... — an empty string is absent.
+      final hasError = event.errorMessage != null && event.errorMessage!.isNotEmpty;
+      final text = hasError
           ? 'Compaction failed: ${event.errorMessage}'
           : event.aborted
               ? 'Compaction stopped'
               : 'Context compacted';
       return _closeNotice(
-          state, 'compaction', event.errorMessage != null ? 'error' : 'info', text);
+          state, 'compaction', hasError ? 'error' : 'info', text);
     case 'auto_retry_start':
-      final of = event.maxAttempts != null ? ' of ${event.maxAttempts}' : '';
-      final why = event.errorMessage != null ? ': ${event.errorMessage}' : '';
+      final of = (event.maxAttempts != null && event.maxAttempts != 0) ? ' of ${event.maxAttempts}' : '';
+      final retryError = event.errorMessage;
+      final why =
+          (retryError != null && retryError.isNotEmpty) ? ': $retryError' : '';
       final d = _open(state);
       d.items.add(NoticeItem(
         id: _nextId(d, 'n'),
@@ -821,8 +830,13 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
     case 'auto_retry_end':
       return event.success
           ? _closeNotice(state, 'retry', 'info', 'Recovered after retry')
-          : _closeNotice(state, 'retry', 'error',
-              event.finalError != null ? 'Gave up retrying: ${event.finalError}' : 'Gave up retrying');
+          : _closeNotice(
+              state,
+              'retry',
+              'error',
+              (event.finalError != null && event.finalError!.isNotEmpty)
+                  ? 'Gave up retrying: ${event.finalError!}'
+                  : 'Gave up retrying');
     case 'model_changed':
       final name = _modelName(event.raw['model']);
       return name != null ? _pushNotice(state, 'info', 'Model: $name') : state;

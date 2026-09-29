@@ -67,7 +67,7 @@ class UserItem extends Item {
     bool? pending,
     Object? note = _sentinel,
     Object? stale = _sentinel,
-    bool? failed,
+    Object? failed = _sentinel,
     Object? error = _sentinel,
     Object? timestamp = _sentinel,
     Object? localId = _sentinel,
@@ -81,7 +81,7 @@ class UserItem extends Item {
         pending: pending ?? this.pending,
         note: note == _sentinel ? this.note : note as UserNote?,
         stale: stale == _sentinel ? this.stale : stale as bool?,
-        failed: failed ?? this.failed,
+        failed: failed == _sentinel ? this.failed : failed as bool?,
         error: error == _sentinel ? this.error : error as String?,
         timestamp: timestamp == _sentinel ? this.timestamp : timestamp as int?,
         localId: localId == _sentinel ? this.localId : localId as String?,
@@ -195,12 +195,17 @@ class ThinkingItem extends Item {
   @override
   String get kind => 'thinking';
 
-  ThinkingItem copyWith({bool? streaming, int? startedAt, int? endedAt}) => ThinkingItem(
+  ThinkingItem copyWith({
+    bool? streaming,
+    Object? startedAt = _sentinel,
+    Object? endedAt = _sentinel,
+  }) =>
+      ThinkingItem(
         id: id,
         text: text,
         streaming: streaming ?? this.streaming,
-        startedAt: startedAt ?? this.startedAt,
-        endedAt: endedAt ?? this.endedAt,
+        startedAt: startedAt == _sentinel ? this.startedAt : startedAt as int?,
+        endedAt: endedAt == _sentinel ? this.endedAt : endedAt as int?,
         messageKey: messageKey,
         raw: raw,
       );
@@ -259,7 +264,7 @@ class ToolItem extends Item {
   ToolItem copyWith({
     ToolStatus? status,
     Object? details = _sentinel,
-    List<FileChange>? files,
+    Object? files = _sentinel,
     Object? messageKey = _sentinel,
   }) =>
       ToolItem(
@@ -272,7 +277,7 @@ class ToolItem extends Item {
         output: output,
         status: status ?? this.status,
         details: details == _sentinel ? this.details : details,
-        files: files ?? this.files,
+        files: files == _sentinel ? this.files : files as List<FileChange>?,
         startedAt: startedAt,
         endedAt: endedAt,
         messageKey: messageKey == _sentinel ? this.messageKey : messageKey as String?,
@@ -353,6 +358,7 @@ class CommandItem extends Item {
   Map<String, Object?> normalized() => {
         'kind': kind,
         'id': id,
+        if (messageKey != null) 'messageKey': messageKey,
         'text': text,
         if (command != null) 'command': command,
       };
@@ -381,12 +387,18 @@ class NoticeItem extends Item {
   @override
   String get kind => 'notice';
 
-  NoticeItem copyWith({String? level, String? text, NoticeTag? tag, bool? active}) => NoticeItem(
+  NoticeItem copyWith({
+    String? level,
+    String? text,
+    Object? tag = _sentinel,
+    Object? active = _sentinel,
+  }) =>
+      NoticeItem(
         id: id,
         level: level ?? this.level,
         text: text ?? this.text,
-        tag: tag ?? this.tag,
-        active: active ?? this.active,
+        tag: tag == _sentinel ? this.tag : tag as NoticeTag?,
+        active: active == _sentinel ? this.active : active as bool?,
         messageKey: messageKey,
         raw: raw,
       );
