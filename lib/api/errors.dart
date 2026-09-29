@@ -1,0 +1,82 @@
+// Error classes for the gateway client, ported from web client behaviour:
+// only a confirmed 401 signs the user out; timeouts, 5xx and Cloudflare
+// errors are connectivity problems (docs/CLIENTS.md).
+
+/// Base class. Everything thrown by [GatewayClient] is one of these.
+sealed class GatewayClientError implements Exception {
+  const GatewayClientError(this.message);
+  final String message;
+
+  @override
+  String toString() => '$runtimeType: $message';
+}
+
+/// Confirmed 401. The only error that signs the user out.
+class AuthError extends GatewayClientError {
+  const AuthError([super.message = 'The gateway rejected the token.']);
+}
+
+/// HTTP 429: the IP is locked out after failed auth attempts (15 min).
+class LockedOut extends GatewayClientError {
+  const LockedOut({this.retryAfterSec, String message = 'Too many attempts. Try again later.'})
+      : super(message);
+  final int? retryAfterSec;
+}
+
+/// Cloudflare answered 400 with an HTML body: the edge refused the request.
+class EdgeRefused extends GatewayClientError {
+  const EdgeRefused([super.message = 'The gateway edge refused the request.']);
+}
+
+/// The gateway answered with a JSON `{error}` body.
+class GatewayError extends GatewayClientError {
+  const GatewayError(this.status, super.message);
+  final int status;
+}
+
+/// Socket failure, timeout, or a 5xx. Connectivity problem, not an auth one.
+class Offline extends GatewayClientError {
+  const Offline([super.message = 'Could not reach the gateway.']);
+}
+
+/// Maps an HTTP response to an error, shared by the client and its tests.
+GatewayClientError errorForResponse({
+  required int status,
+  required String? contentType,
+  required String bodyText,
+  Map<String, dynamic>? json,
+}) {
+  switch (status) {
+    case 401:
+      return const AuthError();
+    case 429:
+      return LockedOut(retryAfterSec: _retryAfter(json));
+  }
+  if (status == 400 && _looksLikeHtml(contentType, bodyText)) {
+    return const EdgeRefused();
+  }
+  final msg = _errorMessage(json) ?? 'HTTP $status';
+  if (status >= 500) return Offline(msg);
+  return GatewayError(status, msg);
+}
+
+int? _retryAfter(Map<String, dynamic>? json) {
+  if (json == null) return null;
+  final v = json['retryAfterSec'];
+  return v is int ? v : (v is num ? v.toInt() : null);
+}
+
+bool _looksLikeHtml(String? contentType, String bodyText) {
+  if (contentType != null && contentType.toLowerCase().contains('text/html')) return true;
+  final t = bodyText.trimLeft();
+  return t.startsWith('<!DOCTYPE') || t.startsWith('<html');
+}
+
+String? _errorMessage(Map<String, dynamic>? json) {
+  if (json == null) return null;
+  final err = json['error'];
+  if (err is String && err.isNotEmpty) return err;
+  final detail = json['detail'];
+  if (detail is String && detail.isNotEmpty) return detail;
+  return null;
+}

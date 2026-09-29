@@ -1,0 +1,50 @@
+{
+  "live": [
+    {
+      "gwId": "c29060e01bc4",
+      "cwd": "/home/user/projects/demo",
+      "approvalMode": "yolo",
+      "resumedFrom": null,
+      "ompSessionId": "01a0ed97-3b9b-7767-bd0c-c95534b683be",
+      "ompSessionFile": "/home/user/.omp/agent/sessions/-projects-demo/2026-09-29T14-35-06-523Z_01a0ed97-3b9b-7767-bd0c-c95534b683be.jsonl",
+      "ompSessionName": "fix the login bug",
+      "model": {
+        "id": "z-ai/glm-5.3-flashx",
+        "name": "GLM 5.3 FlashX",
+        "provider": "openrouter"
+      },
+      "thinkingLevel": "low",
+      "isStreaming": true,
+      "idleSec": 0.0,
+      "exited": false,
+      "exitCode": null,
+      "protocolVersion": 2,
+      "uptimeSec": 320.5,
+      "subscribers": 1,
+      "messageCount": 12,
+      "contextUsage": {"tokens": 40211, "contextWindow": 1048576, "percent": 3.83},
+      "lastEventSeq": 512,
+      "pendingUi": []
+    }
+  ],
+  "saved": [
+    {
+      "file": "/home/user/.omp/agent/sessions/-projects-demo/2026-09-28T09-10-22-100Z_9b2e1f04-aaaa-bbbb-cccc-dddd00001111.jsonl",
+      "mtime": 1790591422.1,
+      "sizeBytes": 184320,
+      "cwdFolder": "-projects-demo",
+      "cwd": "/home/user/projects/demo",
+      "title": "refactor the export path",
+      "running": false
+    },
+    {
+      "file": "/home/user/.omp/agent/sessions/misc/2026-09-27T18-02-00-000Z_0000ffff-1111-2222-3333-444455556666.jsonl",
+      "mtime": 1790505720.0,
+      "sizeBytes": 52411,
+      "cwdFolder": "misc",
+      "cwd": null,
+      "title": "note taking experiment",
+      "running": false
+    }
+  ]
+}

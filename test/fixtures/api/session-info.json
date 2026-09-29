@@ -1,0 +1,53 @@
+{
+  "gwId": "c29060e01bc4",
+  "cwd": "/home/user/projects/ohmypi-gateway",
+  "approvalMode": "yolo",
+  "resumedFrom": null,
+  "ompSessionId": "01a0ed97-3b9b-7767-bd0c-c95534b683be",
+  "ompSessionFile": "/home/user/.omp/agent/sessions/-projects-ohmypi-gateway/2026-09-29T14-35-06-523Z_01a0ed97-3b9b-7767-bd0c-c95534b683be.jsonl",
+  "ompSessionName": null,
+  "model": {
+    "id": "z-ai/glm-5.3-flashx",
+    "name": "GLM 5.3 FlashX",
+    "api": "openrouter",
+    "provider": "openrouter",
+    "reasoning": true,
+    "input": ["text", "image"],
+    "cost": {"input": 0.37, "output": 1.25, "cacheRead": 0.09, "cacheWrite": 0},
+    "contextWindow": 1048576,
+    "maxTokens": 131072,
+    "thinking": {
+      "mode": "effort",
+      "efforts": ["low", "high", "max"],
+      "defaultLevel": "max",
+      "requiresEffort": true
+    },
+    "identity": {"class": "glm", "family": "flash", "revision": "5.3.0"},
+    "tokenizer": "glm5",
+    "compat": {"supportsStore": true, "supportsToolChoice": true}
+  },
+  "thinkingLevel": "low",
+  "isStreaming": false,
+  "idleSec": 0.0,
+  "exited": false,
+  "exitCode": null,
+  "protocolVersion": 2,
+  "uptimeSec": 24.3,
+  "subscribers": 0,
+  "messageCount": 7,
+  "contextUsage": {
+    "tokens": 14852,
+    "contextWindow": 1048576,
+    "percent": 1.4163970947265625
+  },
+  "lastEventSeq": 196,
+  "pendingUi": [
+    {
+      "type": "extension_ui_request",
+      "id": "1592623d6aadd677",
+      "method": "select",
+      "title": "Allow tool: bash\nCommand: echo hi",
+      "options": ["Approve", "Deny"]
+    }
+  ]
+}

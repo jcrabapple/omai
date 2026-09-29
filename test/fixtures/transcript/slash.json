@@ -1,0 +1,511 @@
+{
+ "events": [
+  {
+   "seq": 1,
+   "event": {
+    "type": "extension_ui_request",
+    "id": "1592b32307d48447",
+    "method": "setWidget",
+    "widgetKey": "autoresearch"
+   }
+  },
+  {
+   "seq": 2,
+   "event": {
+    "type": "advisor_cost_changed"
+   }
+  },
+  {
+   "seq": 3,
+   "event": {
+    "type": "available_commands_update",
+    "commands": [
+     {
+      "name": "security",
+      "description": "Plan, run, inspect, import, and compare OMP-native security scans",
+      "input": {
+       "hint": "<plan|scan|status|cancel|scans|show|import|export|validate|compare|disposition>"
+      },
+      "subcommands": [
+       {
+        "name": "plan",
+        "description": "Create an immutable security scan plan"
+       },
+       {
+        "name": "scan",
+        "description": "Start a planned or newly planned native scan"
+       },
+       {
+        "name": "status",
+        "description": "Show native scan operation status"
+       },
+       {
+        "name": "cancel",
+        "description": "Cancel a running native scan"
+       },
+       {
+        "name": "scans",
+        "description": "List stored project security scans"
+       },
+       {
+        "name": "show",
+        "description": "Render a scan or security:// resource"
+       },
+       {
+        "name": "import",
+        "description": "Import SARIF or a Codex Security bundle"
+       },
+       {
+        "name": "export",
+        "description": "Export a canonical bundle, SARIF, or report"
+       },
+       {
+        "name": "validate",
+        "description": "Validate one finding with OMP-native tools"
+       },
+       {
+        "name": "compare",
+        "description": "Compare finding lineage across two scans"
+       },
+       {
+        "name": "disposition",
+        "description": "Set a finding disposition with rationale"
+       }
+      ],
+      "source": "builtin"
+     },
+     {
+      "name": "model",
+      "aliases": [
+       "models"
+      ],
+      "description": "Show current model selection",
+      "source": "builtin"
+     },
+     {
+      "name": "switch",
+      "description": "Switch model for this session only",
+      "input": {
+       "hint": "[model]"
+      },
+      "source": "builtin"
+     }
+    ]
+   }
+  },
+  {
+   "seq": 4,
+   "event": {
+    "type": "command_output",
+    "text": "Context window: 1048576 tokens (1% used)\n  System prompt    [\u001b[38;5;243m░░░░░░░\u001b[39m\u001b[38;5;248m░\u001b[39m\u001b[1m\u001b[38;5;39m░░░░░\u001b[22m\u001b[39m\u001b[38;5;248m░░\u001b[39m\u001b[38;5;243m░░░░░░░░░\u001b[39m] 0%  2704 tokens\n  System tools     [\u001b[38;5;243m░░░░░░ [trimmed]"
+   }
+  },
+  {
+   "seq": 5,
+   "event": {
+    "type": "command_output",
+    "text": "Usage\nInput tokens: 0\nOutput tokens: 0\nCache read tokens: 0\nCache write tokens: 0\nTotal tokens: 0\nPremium requests: 0\nCost: $0.000000"
+   }
+  },
+  {
+   "seq": 6,
+   "event": {
+    "type": "agent_start"
+   }
+  },
+  {
+   "seq": 7,
+   "event": {
+    "type": "turn_start"
+   }
+  },
+  {
+   "seq": 8,
+   "event": {
+    "type": "message_start",
+    "message": {
+     "role": "custom",
+     "customType": "skill-prompt",
+     "content": "[IMPORTANT: User invoked the \"humanizer\" skill; follow its instructions. Full skill below.]\n\n# Humanizer: Remove AI Writing Patterns\n\nIdentify and remove signs of AI-generated text to make writing sound natural and human. Based [trimmed]",
+     "display": true,
+     "details": {
+      "name": "humanizer",
+      "path": "/home/user/.omp/agent/skills/humanizer/SKILL.md",
+      "prompt": "/skill:humanizer",
+      "lineCount": 484
+     },
+     "attribution": "user",
+     "timestamp": 1790692520434
+    },
+    "messageId": "msg-1"
+   }
+  },
+  {
+   "seq": 9,
+   "event": {
+    "type": "message_end",
+    "message": {
+     "role": "custom",
+     "customType": "skill-prompt",
+     "content": "[IMPORTANT: User invoked the \"humanizer\" skill; follow its instructions. Full skill below.]\n\n# Humanizer: Remove AI Writing Patterns\n\nIdentify and remove signs of AI-generated text to make writing sound natural and human. Based [trimmed]",
+     "display": true,
+     "details": {
+      "name": "humanizer",
+      "path": "/home/user/.omp/agent/skills/humanizer/SKILL.md",
+      "prompt": "/skill:humanizer",
+      "lineCount": 484
+     },
+     "attribution": "user",
+     "timestamp": 1790692520434
+    },
+    "messageId": "msg-1"
+   }
+  },
+  {
+   "seq": 10,
+   "event": {
+    "type": "message_start",
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  },
+  {
+   "seq": 11,
+   "event": {
+    "type": "message_update",
+    "assistantMessageEvent": {
+     "type": "thinking_start",
+     "contentIndex": 0
+    },
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  },
+  {
+   "seq": 12,
+   "event": {
+    "type": "message_update",
+    "assistantMessageEvent": {
+     "type": "thinking_delta",
+     "contentIndex": 0,
+     "delta": "User"
+    },
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  },
+  {
+   "seq": 13,
+   "event": {
+    "type": "message_update",
+    "assistantMessageEvent": {
+     "type": "thinking_delta",
+     "contentIndex": 0,
+     "delta": " invoked"
+    },
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  },
+  {
+   "seq": 30,
+   "event": {
+    "type": "message_update",
+    "assistantMessageEvent": {
+     "type": "thinking_end",
+     "contentIndex": 0,
+     "content": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+    },
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  },
+  {
+   "seq": 31,
+   "event": {
+    "type": "message_update",
+    "assistantMessageEvent": {
+     "type": "text_start",
+     "contentIndex": 1
+    },
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  },
+  {
+   "seq": 32,
+   "event": {
+    "type": "message_update",
+    "assistantMessageEvent": {
+     "type": "text_delta",
+     "contentIndex": 1,
+     "delta": "Skill"
+    },
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  },
+  {
+   "seq": 33,
+   "event": {
+    "type": "message_update",
+    "assistantMessageEvent": {
+     "type": "text_delta",
+     "contentIndex": 1,
+     "delta": "'s"
+    },
+    "message": {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "thinking",
+       "thinking": "User invoked humanizer skill but gave no text to humanize. Ask for the text."
+      },
+      {
+       "type": "text",
+       "text": "Skill's loaded. What text do you want humanized? Paste it or point me at the file.\n\nAlso, any controls: style preset (casual/formal/etc.), shorten/expand, terms to lock."
+      }
+     ],
+     "api": "openrouter",
+     "provider": "openrouter",
+     "model": "z-ai/glm-5.3-flashx",
+     "usage": {
+      "input": 0,
+      "output": 0,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 0,
+      "cost": {
+       "input": 0,
+       "output": 0,
+       "cacheRead": 0,
+       "cacheWrite": 0,
+       "total": 0
+      }
+     },
+     "stopReason": "stop",
+     "timestamp": 1790692522248
+    },
+    "messageId": "msg-2"
+   }
+  }
+ ],
+ "lastSeq": 40
+}

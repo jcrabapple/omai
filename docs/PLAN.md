@@ -29,7 +29,7 @@ Coder glm-5.3-flashx via Nous Portal (Hermes `delegate_task`). Review Gemini
 | Client architecture rules | `docs/CLIENTS.md` |
 | Behaviour to port | `web/src/lib/**` (pure TS, tested) |
 | Conformance fixtures | `web/src/lib/**/__fixtures__/*.json` (trimmed, redacted) |
-| Inspiration | `docs/research/android-inspiration-*.md` |
+| Inspiration | this repo, `docs/research/android-inspiration-*.md` |
 
 Porting rule: the web client's `lib/api`, `lib/transcript`, `lib/render/diff2`,
 `lib/state/grouping`, `lib/composer/*` are the behaviour spec. Port behaviour
@@ -180,6 +180,25 @@ Stop; ends when the turn ends. Local notification on new blocking dialog while
 the service runs, with Approve / Deny actions answered via REST without
 opening the app; tapping opens the session. Share intent (text/URL) -> new
 prompt sheet. Launcher shortcut "Needs you". Adaptive icon.
+
+### Folded in from the inspiration research
+
+Assigned to the task that owns the surface:
+
+- D1: open a session at the newest activity, never the top (RikkaHub bug
+  #1077). A session can never stick in "streaming": `agent_end`, a resync, or
+  `isStreaming:false` in fresh info always clears it (Conduit's biggest
+  reliability bug class).
+- D1: live activity line in the header while running (current tool, elapsed)
+  so a six-minute turn never reads as a hang.
+- E: diagnostics page (Relay's capability card): health, auth, WS leg, omp
+  version, catalog reachable, each with a fix hint. Reused after connect.
+- E: "Stats for nerds" in session info: TTFT, tokens/sec, stream reconnects.
+- F: launcher quick actions (New session, Needs you) and a home-screen
+  widget showing the needs-you count, later.
+- Later (needs gateway work, not v1): QR pairing (URL + token) shown by the
+  dashboard's Settings > Connection; multiple routes per connection (LAN,
+  tunnel) with failover.
 
 ## Verification per task
 
