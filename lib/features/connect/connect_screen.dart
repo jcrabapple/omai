@@ -34,14 +34,15 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
   }
 
   Future<void> _test() async {
-    await ref.read(connectionNotifierProvider.notifier).testConnection(
-          _url.text,
-          _token.text,
-        );
+    await ref
+        .read(connectionNotifierProvider.notifier)
+        .testConnection(_url.text, _token.text);
   }
 
   Future<void> _signIn() async {
-    await ref.read(connectionNotifierProvider.notifier).signIn(
+    await ref
+        .read(connectionNotifierProvider.notifier)
+        .signIn(
           url: _url.text,
           label: Uri.tryParse(_url.text.trim())?.host ?? '',
           token: _token.text,
@@ -50,7 +51,8 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
 
   /// Colour by outcome class, never by sniffing the message: failure copy can
   /// contain 'OK' (e.g. 'HTTP OK, but the WebSocket failed').
-  Color _outcomeColor(OmpTokens tokens, ConnectionTestResult outcome) => switch (outcome) {
+  Color _outcomeColor(OmpTokens tokens, ConnectionTestResult outcome) =>
+      switch (outcome) {
         TestOk() => tokens.ok,
         TestWsUnverified() => tokens.warn,
         TestWsFailed() => tokens.err,
@@ -65,70 +67,72 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
 
     return OmpPage(
       title: 'Connect to ohmypi',
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.all(OmpMetrics.s5),
-            children: [
-              Text(
-                'Point the app at your gateway. The token is stored in the '
-                'Android keystore, never in plain prefs.',
-                style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm),
-              ),
-              const SizedBox(height: OmpMetrics.s5),
-              _field(
-                context,
-                controller: _url,
-                label: 'Gateway URL',
-                hint: 'https://your-gateway.example.com',
-                onPaste: () => _paste(_url),
-              ),
+      // No Center wrapper: it vertically centered the form and left a large
+      // empty band under the title. The list starts right under the bar.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: ListView(
+          padding: const EdgeInsets.all(OmpMetrics.s5),
+          children: [
+            Text(
+              'Point the app at your gateway. The token is stored in the '
+              'Android keystore, never in plain prefs.',
+              style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm),
+            ),
+            const SizedBox(height: OmpMetrics.s5),
+            _field(
+              context,
+              controller: _url,
+              label: 'Gateway URL',
+              hint: 'https://your-gateway.example.com',
+              onPaste: () => _paste(_url),
+            ),
+            const SizedBox(height: OmpMetrics.s4),
+            _field(
+              context,
+              controller: _token,
+              label: 'Gateway token',
+              hint: 'The token from the gateway host',
+              obscure: true,
+              onPaste: () => _paste(_token),
+            ),
+            const SizedBox(height: OmpMetrics.s5),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: state.busy ? null : _test,
+                    child: const Text('Test connection'),
+                  ),
+                ),
+                const SizedBox(width: OmpMetrics.s3),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: state.busy ? null : _signIn,
+                    child: const Text('Sign in'),
+                  ),
+                ),
+              ],
+            ),
+            if (state.busy) ...[
               const SizedBox(height: OmpMetrics.s4),
-              _field(
-                context,
-                controller: _token,
-                label: 'Gateway token',
-                hint: 'The token from the gateway host',
-                obscure: true,
-                onPaste: () => _paste(_token),
+              const SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-              const SizedBox(height: OmpMetrics.s5),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: state.busy ? null : _test,
-                      child: const Text('Test connection'),
-                    ),
-                  ),
-                  const SizedBox(width: OmpMetrics.s3),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: state.busy ? null : _signIn,
-                      child: const Text('Sign in'),
-                    ),
-                  ),
-                ],
-              ),
-              if (state.busy) ...[
-                const SizedBox(height: OmpMetrics.s4),
-                const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ],
-              if (result != null) ...[
-                const SizedBox(height: OmpMetrics.s4),
-                Text(
-                  result.message,
-                  style: TextStyle(color: _outcomeColor(tokens, result), fontSize: OmpMetrics.fsSm),
-                ),
-              ],
             ],
-          ),
+            if (result != null) ...[
+              const SizedBox(height: OmpMetrics.s4),
+              Text(
+                result.message,
+                style: TextStyle(
+                  color: _outcomeColor(tokens, result),
+                  fontSize: OmpMetrics.fsSm,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -146,11 +150,14 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: TextStyle(
-                color: tokens.ink2,
-                fontSize: OmpMetrics.fsSm,
-                fontWeight: FontWeight.w600)),
+        Text(
+          label,
+          style: TextStyle(
+            color: tokens.ink2,
+            fontSize: OmpMetrics.fsSm,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: OmpMetrics.s1),
         TextField(
           controller: controller,
@@ -159,9 +166,10 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
           enableSuggestions: !obscure,
           keyboardType: TextInputType.url,
           style: TextStyle(
-              color: tokens.ink,
-              fontSize: OmpMetrics.fsBase,
-              fontFamily: obscure ? 'monospace' : null),
+            color: tokens.ink,
+            fontSize: OmpMetrics.fsBase,
+            fontFamily: obscure ? 'monospace' : null,
+          ),
           decoration: InputDecoration(
             hintText: hint,
             suffixIcon: IconButton(

@@ -29,27 +29,34 @@ class SessionScreen extends ConsumerStatefulWidget {
 class _SessionScreenState extends ConsumerState<SessionScreen> {
   AppLifecycleListener? _lifecycle;
 
-  // Set in initState: dispose still needs them after `ref` is unsafe.
-  SessionController? _controller;
+  // Set in initState: dispose still needs the store after `ref` is unsafe.
+  // (The session controller is deliberately NOT cached here: invalidation on
+  // retry replaces the notifier, so it is read at call time instead.)
   SessionsStore? _sessions;
 
   @override
   void initState() {
     super.initState();
-    _controller = ref.read(sessionControllerProvider(widget.gwId).notifier);
     _sessions = ref.read(sessionsStoreProvider.notifier);
     _lifecycle = AppLifecycleListener(
       // Task F adds a foreground service; until then backgrounding drops the
-      // socket and the poll.
+      // socket and the poll. The sessions LIST polling is owned by
+      // SessionsScreen alone — resuming here must not restart it, this
+      // screen gets its updates over the WebSocket.
       onResume: () {
-        _controller?.resume();
-        _sessions?.startPolling();
+        _readController()?.resume();
       },
       onPause: () {
-        _controller?.pause();
-        _sessions?.stopPolling();
+        _readController()?.pause();
       },
     );
+  }
+
+  /// The notifier, read at call time: a retry invalidates the provider and
+  /// replaces the controller instance.
+  SessionController? _readController() {
+    if (!mounted) return null;
+    return ref.read(sessionControllerProvider(widget.gwId).notifier);
   }
 
   @override
@@ -71,32 +78,37 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
 
     return Scaffold(
       backgroundColor: tokens.canvas,
-      appBar: SessionHeader(gwId: widget.gwId),
+      appBar: SessionHeader(
+        gwId: widget.gwId,
+        hasActivity: state.activity != null,
+      ),
       body: switch (state.phase) {
-        SessionPhase.gone => _GoneView(onBack: () => Navigator.of(context).pop()),
+        SessionPhase.gone => _GoneView(
+          onBack: () => Navigator.of(context).pop(),
+        ),
         SessionPhase.error => _ErrorView(error: state.error, onRetry: _retry),
         _ => Column(
-            children: [
-              Expanded(
-                child: TranscriptList(state: state),
-              ),
-              // Blocking dialogs take over the composer slot; non-blocking
-              // notify requests never reach pendingUi (the reducer filters).
-              if (state.pendingUi.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
-                  child: ApprovalPanel(
-                    gwId: widget.gwId,
-                    request: state.pendingUi.first,
-                    index: 1,
-                    total: state.pendingUi.length,
-                  ),
-                )
-              else
-                SessionComposer(gwId: widget.gwId),
-            ],
-          ),
+          children: [
+            Expanded(child: TranscriptList(state: state)),
+            // Blocking dialogs take over the composer slot; non-blocking
+            // notify requests never reach pendingUi (the reducer filters).
+            if (state.pendingUi.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: OmpMetrics.s3,
+                  vertical: OmpMetrics.s2,
+                ),
+                child: ApprovalPanel(
+                  gwId: widget.gwId,
+                  request: state.pendingUi.first,
+                  index: 1,
+                  total: state.pendingUi.length,
+                ),
+              )
+            else
+              SessionComposer(gwId: widget.gwId),
+          ],
+        ),
       },
     );
   }
@@ -116,16 +128,20 @@ class _GoneView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('This session has ended',
-                style: TextStyle(
-                    color: tokens.ink,
-                    fontSize: OmpMetrics.fsLg,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              'This session has ended',
+              style: TextStyle(
+                color: tokens.ink,
+                fontSize: OmpMetrics.fsLg,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: OmpMetrics.s2),
-            Text('The transcript is saved in History.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: tokens.ink2, fontSize: OmpMetrics.fsBase)),
+            Text(
+              'The transcript is saved in History.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsBase),
+            ),
             const SizedBox(height: OmpMetrics.s4),
             OutlinedButton(onPressed: onBack, child: const Text('Back')),
           ],
@@ -150,17 +166,24 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Could not open this session',
-                style: TextStyle(
-                    color: tokens.ink,
-                    fontSize: OmpMetrics.fsLg,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              'Could not open this session',
+              style: TextStyle(
+                color: tokens.ink,
+                fontSize: OmpMetrics.fsLg,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             if (error != null && error!.isNotEmpty) ...[
               const SizedBox(height: OmpMetrics.s2),
-              Text(error!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: tokens.ink2, fontSize: OmpMetrics.fsBase)),
+              Text(
+                error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: tokens.ink2,
+                  fontSize: OmpMetrics.fsBase,
+                ),
+              ),
             ],
             const SizedBox(height: OmpMetrics.s4),
             OutlinedButton(onPressed: onRetry, child: const Text('Try again')),

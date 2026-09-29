@@ -64,7 +64,8 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       },
       onShow: () {
         _appResumed =
-            SchedulerBinding.instance.lifecycleState == AppLifecycleState.resumed;
+            SchedulerBinding.instance.lifecycleState ==
+            AppLifecycleState.resumed;
         _syncPolling();
       },
     );
@@ -76,7 +77,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     ompRouteObserver.subscribe(
-        this, ModalRoute.of(context) as PageRoute<Object?>);
+      this,
+      ModalRoute.of(context) as PageRoute<Object?>,
+    );
   }
 
   @override
@@ -129,68 +132,116 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
     final sessions = ref.watch(sessionsStoreProvider);
     final groups = ref.watch(sessionGroupsProvider);
 
-    final empty = sessions.loaded &&
+    final empty =
+        sessions.loaded &&
         groups.needsYou.isEmpty &&
         groups.review.isEmpty &&
         groups.running.isEmpty &&
         groups.idle.isEmpty &&
         groups.history.isEmpty;
 
-      return Scaffold(
+    return Scaffold(
+      backgroundColor: tokens.bg,
+      appBar: AppBar(
+        title: const Text('Sessions'),
         backgroundColor: tokens.bg,
-        appBar: AppBar(
-          title: const Text('Sessions'),
-          backgroundColor: tokens.bg,
-          foregroundColor: tokens.ink,
-          elevation: 0,
-          actions: [
-            PopupMenuButton<String>(
-              tooltip: 'More options',
-              icon: const Icon(Icons.more_vert),
-              onSelected: (v) {
-                if (v == 'signout') _signOut();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'signout', child: Text('Sign out')),
-              ],
+        foregroundColor: tokens.ink,
+        elevation: 0,
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'More options',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (v) {
+              if (v == 'signout') _signOut();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'signout', child: Text('Sign out')),
+            ],
+          ),
+        ],
+      ),
+      body: !sessions.loaded
+          ? (sessions.error != null
+                // First-load failure: a spinner forever is a trap. Show the
+                // error as the body with a way out.
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(OmpMetrics.s5),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            "Can't reach the gateway.",
+                            style: TextStyle(
+                              color: tokens.ink,
+                              fontSize: OmpMetrics.fsLg,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: OmpMetrics.s2),
+                          Text(
+                            sessions.error!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: tokens.ink2,
+                              fontSize: OmpMetrics.fsBase,
+                            ),
+                          ),
+                          const SizedBox(height: OmpMetrics.s4),
+                          OutlinedButton(
+                            onPressed: () => ref
+                                .read(sessionsStoreProvider.notifier)
+                                .refresh(),
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : Center(
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: tokens.accent,
+                      ),
+                    ),
+                  ))
+          : RefreshIndicator(
+              color: tokens.accent,
+              backgroundColor: tokens.surface,
+              onRefresh: () =>
+                  ref.read(sessionsStoreProvider.notifier).refresh(),
+              child: _buildBody(context, sessions, groups, empty),
             ),
-          ],
-        ),
-        body: !sessions.loaded
-            ? Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: tokens.accent),
-                ),
-              )
-            : RefreshIndicator(
-                color: tokens.accent,
-                backgroundColor: tokens.surface,
-                onRefresh: () =>
-                    ref.read(sessionsStoreProvider.notifier).refresh(),
-                child: _buildBody(context, sessions, groups, empty),
-              ),
-        floatingActionButton: FloatingActionButton.extended(
-          tooltip: 'New session',
-          onPressed: () => showNewSessionSheet(context, ref,
-              onCreated: _onSessionStarted),
-          icon: const Icon(Icons.add),
-          label: const Text('New session'),
-        ),
-      );
+      floatingActionButton: FloatingActionButton.extended(
+        tooltip: 'New session',
+        onPressed: () =>
+            showNewSessionSheet(context, ref, onCreated: _onSessionStarted),
+        icon: const Icon(Icons.add),
+        label: const Text('New session'),
+      ),
+    );
   }
 
-  Widget _buildBody(BuildContext context, SessionsState sessions,
-      SessionGroups groups, bool empty) {
+  Widget _buildBody(
+    BuildContext context,
+    SessionsState sessions,
+    SessionGroups groups,
+    bool empty,
+  ) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
     if (empty) {
-      return ListView(padding: const EdgeInsets.all(OmpMetrics.s5), children: [
-        Text('No sessions yet.',
-            style:
-                TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsBase)),
-      ]);
+      return ListView(
+        padding: const EdgeInsets.all(OmpMetrics.s5),
+        children: [
+          Text(
+            'No sessions yet.',
+            style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsBase),
+          ),
+        ],
+      );
     }
     final children = <Widget>[];
     void section(String label, List<Widget> rows) {
@@ -200,46 +251,44 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
     }
 
     Widget liveRow(SessionInfo s, SessionStatus status) => SessionRow(
-          key: ValueKey('live:${s.gwId}'),
-          title: s.title,
-          sub: _liveSub(s),
-          status: status,
-          badge: s.pendingUi.length,
-          onTap: () => _openSession(s.gwId),
-        );
+      key: ValueKey('live:${s.gwId}'),
+      title: s.title,
+      sub: _liveSub(s),
+      status: status,
+      badge: s.pendingUi.length,
+      onTap: () => _openSession(s.gwId),
+    );
 
-    section(
-        'Needs you',
-        [for (final s in groups.needsYou) liveRow(s, 'needs')]);
-    section(
-        'Ready for review',
-        [for (final s in groups.review) liveRow(s, 'review')]);
-    section(
-        'Running',
-        [for (final s in groups.running) liveRow(s, 'running')]);
+    section('Needs you', [
+      for (final s in groups.needsYou) liveRow(s, 'needs'),
+    ]);
+    section('Ready for review', [
+      for (final s in groups.review) liveRow(s, 'review'),
+    ]);
+    section('Running', [for (final s in groups.running) liveRow(s, 'running')]);
     section('Idle', [for (final s in groups.idle) liveRow(s, 'idle')]);
     for (final h in groups.history) {
-      section(
-          h.label,
-          [
-            for (final s in h.items)
-              SessionRow(
-                key: ValueKey('saved:${s.file}'),
-                title: s.title,
-                sub: '${basename(s.cwd ?? s.cwdFolder)} · '
-                    '${relativeTime((s.mtime * 1000).round(), DateTime.now().millisecondsSinceEpoch)}',
-                status: null,
-                busy: _resuming.contains(s.file),
-                onTap:
-                    _resuming.contains(s.file) ? null : () => _resume(s),
-              ),
-          ]);
+      section(h.label, [
+        for (final s in h.items)
+          SessionRow(
+            key: ValueKey('saved:${s.file}'),
+            title: s.title,
+            sub:
+                '${basename(s.cwd ?? s.cwdFolder)} · '
+                '${relativeTime((s.mtime * 1000).round(), DateTime.now().millisecondsSinceEpoch)}',
+            status: null,
+            busy: _resuming.contains(s.file),
+            onTap: _resuming.contains(s.file) ? null : () => _resume(s),
+          ),
+      ]);
     }
     if (sessions.error != null) {
-      children.add(_ErrorBanner(
-        message: "Can't reach the gateway. Trying again.",
-        onRetry: () => ref.read(sessionsStoreProvider.notifier).refresh(),
-      ));
+      children.add(
+        _ErrorBanner(
+          message: "Can't reach the gateway. Trying again.",
+          onRetry: () => ref.read(sessionsStoreProvider.notifier).refresh(),
+        ),
+      );
     }
     return ListView(
       padding: const EdgeInsets.all(OmpMetrics.s4),
@@ -249,14 +298,17 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
 
   String _liveSub(SessionInfo s) {
     final model = s.model?.displayName;
-    return [basename(s.cwd), model].where((p) => p != null && p.isNotEmpty).join(' · ');
+    return [
+      basename(s.cwd),
+      model,
+    ].where((p) => p != null && p.isNotEmpty).join(' · ');
   }
 
   void _openSession(String gwId) {
     ref.read(sessionsStoreProvider.notifier).setOpenSession(gwId);
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => SessionScreen(gwId: gwId),
-    ));
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => SessionScreen(gwId: gwId)));
   }
 
   /// A session the New session sheet created: surface it in the store and
@@ -283,8 +335,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       final token = await ref.read(tokenStoreProvider).read(active.id);
       if (!mounted) return;
       if (token == null || token.isEmpty) throw const Offline('Not signed in.');
-      final client =
-          ref.read(gatewayClientFactoryProvider)(active.url, token);
+      final client = ref.read(gatewayClientFactoryProvider)(active.url, token);
       final info = await client.startSession(resumeFrom: s.file);
       if (!mounted) return;
       store.patch(info);
@@ -292,20 +343,24 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       if (!mounted) return;
       _openSession(info.gwId);
       if (info.cwdFallback) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
               'The folder ${s.displayCwd} no longer exists. '
-              'The session started in ${info.cwd} instead.'),
-        ));
+              'The session started in ${info.cwd} instead.',
+            ),
+          ),
+        );
       }
     } on GatewayClientError catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Could not resume the session')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not resume the session')),
+        );
       }
     } finally {
       _resuming.remove(s.file);
@@ -325,9 +380,10 @@ class _SectionHeader extends StatelessWidget {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
     return Padding(
       padding: const EdgeInsets.only(
-          left: OmpMetrics.s1,
-          top: OmpMetrics.s4,
-          bottom: OmpMetrics.s1),
+        left: OmpMetrics.s1,
+        top: OmpMetrics.s4,
+        bottom: OmpMetrics.s1,
+      ),
       child: Row(
         children: [
           Semantics(
@@ -343,9 +399,10 @@ class _SectionHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(width: OmpMetrics.s2),
-          Text('$count',
-              style:
-                  TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsXs)),
+          Text(
+            '$count',
+            style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsXs),
+          ),
         ],
       ),
     );
@@ -379,10 +436,13 @@ class SessionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
+    final s = status;
     return Semantics(
-      label: '$title. ${status != null ? statusLabels[status] : ''} $sub'
+      label:
+          '$title. ${s != null ? (statusLabels[s] ?? s) : ''} $sub'
           '${badge > 0 ? ', $badge waiting' : ''}',
       button: onTap != null,
+      excludeSemantics: true,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
@@ -390,7 +450,9 @@ class SessionRow extends StatelessWidget {
           constraints: const BoxConstraints(minHeight: 48),
           child: Padding(
             padding: const EdgeInsets.symmetric(
-                horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
+              horizontal: OmpMetrics.s3,
+              vertical: OmpMetrics.s2,
+            ),
             child: Row(
               children: [
                 SizedBox(
@@ -401,10 +463,13 @@ class SessionRow extends StatelessWidget {
                             width: 12,
                             height: 12,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: tokens.accent))
+                              strokeWidth: 2,
+                              color: tokens.accent,
+                            ),
+                          )
                         : status != null
-                            ? StatusGlyph(status: status!)
-                            : const SizedBox(width: 8, height: 8),
+                        ? StatusGlyph(status: status!)
+                        : const SizedBox(width: 8, height: 8),
                   ),
                 ),
                 const SizedBox(width: OmpMetrics.s3),
@@ -413,19 +478,25 @@ class SessionRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: tokens.ink,
-                              fontSize: OmpMetrics.fsBase,
-                              fontWeight: FontWeight.w500)),
-                      Text(sub,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              color: tokens.ink3,
-                              fontSize: OmpMetrics.fsSm)),
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: tokens.ink,
+                          fontSize: OmpMetrics.fsBase,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: tokens.ink3,
+                          fontSize: OmpMetrics.fsSm,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -433,16 +504,21 @@ class SessionRow extends StatelessWidget {
                   const SizedBox(width: OmpMetrics.s2),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: tokens.warnSoft,
                       borderRadius: BorderRadius.circular(999),
                     ),
-                    child: Text('$badge',
-                        style: TextStyle(
-                            color: tokens.warn,
-                            fontSize: OmpMetrics.fsXs,
-                            fontWeight: FontWeight.w600)),
+                    child: Text(
+                      '$badge',
+                      style: TextStyle(
+                        color: tokens.warn,
+                        fontSize: OmpMetrics.fsXs,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ],
               ],
@@ -471,22 +547,37 @@ class _ErrorBanner extends StatelessWidget {
         child: InkWell(
           onTap: onRetry,
           borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(message,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: OmpMetrics.hit,
+              minWidth: OmpMetrics.hit,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: OmpMetrics.s3,
+                vertical: OmpMetrics.s2,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      message,
                       style: TextStyle(
-                          color: tokens.err, fontSize: OmpMetrics.fsSm)),
-                ),
-                Text('Retry',
-                    style: TextStyle(
                         color: tokens.err,
                         fontSize: OmpMetrics.fsSm,
-                        fontWeight: FontWeight.w600)),
-              ],
+                      ),
+                    ),
+                  ),
+                  Text(
+                    'Retry',
+                    style: TextStyle(
+                      color: tokens.err,
+                      fontSize: OmpMetrics.fsSm,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

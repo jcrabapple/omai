@@ -18,12 +18,25 @@ import 'context_meter.dart';
 import 'session_actions.dart';
 
 class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
-  const SessionHeader({super.key, required this.gwId});
+  const SessionHeader({
+    super.key,
+    required this.gwId,
+    this.hasActivity = false,
+  });
 
   final String gwId;
 
+  /// True while a turn runs and the activity line is shown below the bar.
+  /// The Scaffold sizes the bar from [preferredSize], so it must know here —
+  /// otherwise the AppBar's bottom overflows the allocated height.
+  final bool hasActivity;
+
+  static const double _toolbar = kToolbarHeight + 26;
+  static const double _activityRow = 24;
+
   @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight + 26);
+  Size get preferredSize =>
+      Size.fromHeight(_toolbar + (hasActivity ? _activityRow : 0));
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,7 +53,7 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
       backgroundColor: tokens.canvas,
       foregroundColor: tokens.ink,
       elevation: 0,
-      toolbarHeight: kToolbarHeight + 26,
+      toolbarHeight: _toolbar,
       leading: const BackButton(),
       actions: [SessionActions(gwId: gwId)],
       titleSpacing: 0,
@@ -53,9 +66,10 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-                color: tokens.ink,
-                fontSize: OmpMetrics.fsLg,
-                fontWeight: FontWeight.w600),
+              color: tokens.ink,
+              fontSize: OmpMetrics.fsLg,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 2),
           SizedBox(
@@ -64,35 +78,44 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
               children: [
                 if (model.isNotEmpty) ...[
                   Flexible(
-                    child: Text(model,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color: tokens.ink3, fontSize: OmpMetrics.fsXs)),
+                    child: Text(
+                      model,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: tokens.ink3,
+                        fontSize: OmpMetrics.fsXs,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: OmpMetrics.s3),
                 ],
-                _ContextMeterFromState(
-                    info: info, stats: state.stats),
+                _ContextMeterFromState(info: info, stats: state.stats),
                 if (cost != null) ...[
                   const SizedBox(width: OmpMetrics.s3),
-                  Text(cost,
-                      style: TextStyle(
-                          color: tokens.ink2, fontSize: OmpMetrics.fsXs)),
+                  Text(
+                    cost,
+                    style: TextStyle(
+                      color: tokens.ink2,
+                      fontSize: OmpMetrics.fsXs,
+                    ),
+                  ),
                 ],
                 const SizedBox(width: OmpMetrics.s3),
-                ConnectionDot(status: state.connection),
+                Flexible(child: ConnectionDot(status: state.connection)),
               ],
             ),
           ),
         ],
       ),
-      bottom: state.activity != null
+      bottom: hasActivity && state.activity != null
           ? PreferredSize(
-              preferredSize: const Size.fromHeight(22),
+              preferredSize: const Size.fromHeight(_activityRow),
               child: Padding(
                 padding: const EdgeInsets.only(
-                    left: OmpMetrics.s4, bottom: OmpMetrics.s1),
+                  left: OmpMetrics.s4,
+                  bottom: OmpMetrics.s1,
+                ),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: ActivityLine(activity: state.activity!),
@@ -132,8 +155,7 @@ class _ContextMeterFromState extends StatelessWidget {
       tokensUsed = usage?.tokens;
       window = usage?.contextWindow;
     }
-    return ContextMeter(
-        percent: percent, tokens: tokensUsed, window: window);
+    return ContextMeter(percent: percent, tokens: tokensUsed, window: window);
   }
 }
 
@@ -168,8 +190,7 @@ class _ConnectionDotState extends State<ConnectionDot> {
     final retrying = widget.status.state == StreamState.retrying;
     if (retrying && _ticker == null) {
       _now = DateTime.now();
-      _ticker =
-          Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
         if (mounted) setState(() => _now = DateTime.now());
       });
     } else if (!retrying && _ticker != null) {
@@ -195,11 +216,11 @@ class _ConnectionDotState extends State<ConnectionDot> {
           return (t.warn, widget.status.message!);
         }
         final retryAt = widget.status.retryAt;
-        final s = retryAt == null
-            ? 0
-            : retryAt - _now.millisecondsSinceEpoch;
-        return (t.warn,
-            s > 0 ? 'Reconnecting in ${(s / 1000).ceil()} s' : 'Reconnecting');
+        final s = retryAt == null ? 0 : retryAt - _now.millisecondsSinceEpoch;
+        return (
+          t.warn,
+          s > 0 ? 'Reconnecting in ${(s / 1000).ceil()} s' : 'Reconnecting',
+        );
       case StreamState.offline:
       case StreamState.gone:
         return (t.err, 'Offline');
@@ -222,9 +243,14 @@ class _ConnectionDotState extends State<ConnectionDot> {
           ),
           if (text.isNotEmpty) ...[
             const SizedBox(width: OmpMetrics.s1),
-            Text(text,
-                style: TextStyle(
-                    color: tokens.ink3, fontSize: OmpMetrics.fsXs)),
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsXs),
+              ),
+            ),
           ],
         ],
       ),
@@ -246,17 +272,36 @@ class ActivityLine extends StatefulWidget {
 
 class _ActivityLineState extends State<ActivityLine> {
   Timer? _ticker;
+  AppLifecycleListener? _lifecycle;
 
   @override
   void initState() {
     super.initState();
+    _startTicker();
+    // A 1 s ticker must not keep waking the process in the background.
+    _lifecycle = AppLifecycleListener(
+      onPause: _stopTicker,
+      onHide: _stopTicker,
+      onResume: _startTicker,
+      onShow: _startTicker,
+    );
+  }
+
+  void _startTicker() {
+    _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() {});
     });
   }
 
+  void _stopTicker() {
+    _ticker?.cancel();
+    _ticker = null;
+  }
+
   @override
   void dispose() {
+    _lifecycle?.dispose();
     _ticker?.cancel();
     super.dispose();
   }
@@ -280,12 +325,15 @@ class _ActivityLineState extends State<ActivityLine> {
             width: 10,
             height: 10,
             child: CircularProgressIndicator(
-                strokeWidth: 1.5, color: tokens.accent),
+              strokeWidth: 1.5,
+              color: tokens.accent,
+            ),
           ),
           const SizedBox(width: OmpMetrics.s2),
-          Text(text,
-              style: TextStyle(
-                  color: tokens.ink2, fontSize: OmpMetrics.fsXs)),
+          Text(
+            text,
+            style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsXs),
+          ),
         ],
       ),
     );
