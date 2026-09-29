@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpServer, WebSocketTransformer;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,9 +15,43 @@ class MockConnectionPrefs extends Mock implements ConnectionPrefs {}
 
 class MockTokenStore extends Mock implements TokenStore {}
 
+/// ConnectionPrefs that delays load(), to exercise the load/sign-in race.
+class DelayedPrefs extends Mock implements ConnectionPrefs {
+  DelayedPrefs(this.delay);
+  final Duration delay;
+  final List<ConnectionRecord> saved = [];
+
+  @override
+  Future<List<ConnectionRecord>> load() async {
+    await Future<void>.delayed(delay);
+    return const [];
+  }
+
+  @override
+  Future<void> save(List<ConnectionRecord> connections) async {
+    saved
+      ..clear()
+      ..addAll(connections);
+  }
+}
+
 http.Response _json(Object? body, {int status = 200}) =>
     http.Response(jsonEncode(body), status,
         headers: {'content-type': 'application/json'});
+
+http.Response _liveSessions({String gwId = 'abc'}) => _json({
+      'live': [
+        {'gwId': gwId, 'cwd': '/home/user/x'}
+      ],
+      'saved': []
+    });
+
+http.Response _okChain(http.Request req) {
+  if (req.url.path == '/healthz') return _json({'ok': true});
+  if (req.url.path == '/api/me') return _json({'method': 'bearer'});
+  if (req.url.path == '/api/sessions') return _liveSessions();
+  return _json({});
+}
 
 void main() {
   late MockConnectionPrefs prefs;
@@ -38,9 +74,10 @@ void main() {
   ProviderContainer container({
     GatewayClientFactory? clientFactory,
     WsProbe? probe,
+    ConnectionPrefs? prefsOverride,
   }) {
     final c = ProviderContainer(overrides: [
-      connectionPrefsProvider.overrideWithValue(prefs),
+      connectionPrefsProvider.overrideWithValue(prefsOverride ?? prefs),
       tokenStoreProvider.overrideWithValue(tokens),
       if (clientFactory != null)
         gatewayClientFactoryProvider.overrideWithValue(clientFactory),
@@ -89,6 +126,28 @@ void main() {
     expect(c.read(connectionNotifierProvider).signedIn, isFalse);
   });
 
+  test('sign in completing before a slow load is not overwritten by it',
+      () async {
+    // The delayed load finishes AFTER signIn has applied its state.
+    final delayed = DelayedPrefs(const Duration(milliseconds: 120));
+    final c = container(prefsOverride: delayed);
+    final notifier = c.read(connectionNotifierProvider.notifier);
+
+    final signing = notifier.signIn(
+        url: 'https://gw.example.com', label: 'gw', token: 'sekrit');
+    final signed = await signing;
+
+    expect(c.read(connectionNotifierProvider).signedIn, isTrue);
+    expect(c.read(connectionNotifierProvider).active!.id, signed.record.id);
+    expect(c.read(connectionNotifierProvider).active!.url,
+        'https://gw.example.com');
+
+    // Let the slow load land; it must not clobber the sign-in.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(c.read(connectionNotifierProvider).signedIn, isTrue);
+    expect(c.read(connectionNotifierProvider).active!.id, signed.record.id);
+  });
+
   test('sign in persists url (trailing slash stripped) and token by id',
       () async {
     final c = container();
@@ -97,24 +156,57 @@ void main() {
 
     final signed = await notifier.signIn(
         url: 'https://gw.example.com/', label: 'home gw', token: 'sekrit');
-    expect(signed.record.id, 'gw.example.com');
     expect(signed.record.url, 'https://gw.example.com');
-    verify(() => tokens.write('gw.example.com', 'sekrit')).called(1);
+    verify(() => tokens.write(signed.record.id, 'sekrit')).called(1);
     verify(() => prefs.save(any(that: hasLength(1)))).called(1);
     expect(c.read(connectionNotifierProvider).signedIn, isTrue);
   });
 
-  test('sign out removes the record and the token', () async {
+  test('new connections get a permanent random id; the same url reuses it',
+      () async {
+    final c = container();
+    await settle(c);
+    final notifier = c.read(connectionNotifierProvider.notifier);
+
+    final first = await notifier.signIn(
+        url: 'https://gw.example.com', label: 'gw', token: 't1');
+    expect(RegExp(r'^[0-9a-f]{16}$').hasMatch(first.record.id), isTrue,
+        reason: 'id is 16 hex chars, not derived from the url');
+
+    // Re-signing the same url (with a trailing slash) keeps the id, so the
+    // secure-storage token key cannot drift.
+    final second = await notifier.signIn(
+        url: 'https://gw.example.com/', label: 'gw2', token: 't2');
+    expect(second.record.id, first.record.id);
+    verify(() => tokens.write(first.record.id, 't2')).called(1);
+
+    // A different url gets a different id.
+    final other = await notifier.signIn(
+        url: 'https://other.example.com', label: 'o', token: 't3');
+    expect(other.record.id, isNot(first.record.id));
+  });
+
+  test('sign out updates state before touching storage', () async {
     final c = container();
     await settle(c);
     final notifier = c.read(connectionNotifierProvider.notifier);
 
     await notifier.signIn(url: 'https://gw.example.com', label: 'gw', token: 'tok');
-    await notifier.signOut();
+    expect(c.read(connectionNotifierProvider).signedIn, isTrue);
 
-    verify(() => tokens.delete('gw.example.com')).called(1);
+    // Make the storage delete slow: state must already be signed out.
+    final gate = Completer<void>();
+    when(() => tokens.delete(any())).thenAnswer((_) => gate.future);
+    final signingOut = notifier.signOut();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(c.read(connectionNotifierProvider).signedIn, isFalse,
+        reason: 'state clears before the storage delete resolves');
+
+    gate.complete();
+    await signingOut;
+    verify(() => tokens.delete(any())).called(1);
     verify(() => prefs.save(const <ConnectionRecord>[])).called(1);
-    expect(c.read(connectionNotifierProvider).signedIn, isFalse);
   });
 
   test('test connection guards empty url and token without HTTP calls',
@@ -129,32 +221,40 @@ void main() {
     await settle(c);
     final notifier = c.read(connectionNotifierProvider.notifier);
 
-    expect(
-        await notifier.testConnection('', 'tok'), 'Enter the gateway URL first.');
-    expect(await notifier.testConnection('https://gw.example.com', '  '),
-        'Enter the gateway token first.');
+    final noUrl = await notifier.testConnection('', 'tok');
+    expect(noUrl, isA<TestError>());
+    expect(noUrl.message, 'Enter the gateway URL first.');
+    final noToken = await notifier.testConnection('https://gw.example.com', '  ');
+    expect(noToken, isA<TestError>());
+    expect(noToken.message, 'Enter the gateway token first.');
     expect(httpCalled, isFalse);
   });
 
   final failureCases = <String, Map<String, Object?>>{
     'AuthError': {
       'status': 401,
+      'kind': TestError,
       'expect': 'The gateway rejected the token. Check it and try again.',
     },
     'LockedOut': {
       'status': 429,
+      'retryAfterSec': 60,
+      'kind': TestError,
       'expect': 'Too many failed attempts. This IP is locked out for a while.',
     },
     'EdgeRefused': {
       'html': true,
+      'kind': TestError,
       'expect': 'The edge (Cloudflare) refused the request. Check the URL.',
     },
     'Offline': {
       'status': 503,
+      'kind': TestError,
       'expect': 'Could not reach the gateway. Check the URL and your network.',
     },
     'GatewayError': {
       'status': 404,
+      'kind': TestError,
       'expect': 'The gateway answered with an error: not found',
     },
   };
@@ -162,18 +262,23 @@ void main() {
     test('connection test maps $name to clear copy', () async {
       final html = spec['html'] == true;
       final status = spec['status'] as int? ?? 400;
+      final retry = spec.containsKey('retryAfterSec');
+      final body = <String, Object?>{'error': 'not found'};
+      if (retry) body['retryAfterSec'] = 60;
       final c = container(
         clientFactory: stubClient((_) async => html
             ? http.Response('<html>err</html>', 400,
                 headers: {'content-type': 'text/html'})
-            : _json({'error': 'not found'}, status: status)),
+            : _json(body, status: status)),
       );
       await settle(c);
       final outcome = await c
           .read(connectionNotifierProvider.notifier)
           .testConnection('https://gw.example.com', 'tok');
-      expect(outcome, spec['expect']);
-      expect(c.read(connectionNotifierProvider).testOutcome, spec['expect']);
+      expect(outcome.runtimeType, spec['kind'], reason: name);
+      expect(outcome.message, spec['expect']);
+      expect(c.read(connectionNotifierProvider).testResult?.message,
+          spec['expect']);
       expect(c.read(connectionNotifierProvider).busy, isFalse);
     });
   });
@@ -182,19 +287,11 @@ void main() {
       () async {
     Uri? probedUri;
     Map<String, String>? probedHeaders;
+    Uri? sessionsUri;
     final c = container(
       clientFactory: stubClient((req) async {
-        if (req.url.path == '/healthz') return _json({'ok': true});
-        if (req.url.path == '/api/me') return _json({'method': 'bearer'});
-        if (req.url.path == '/api/sessions') {
-          return _json({
-            'live': [
-              {'gwId': 'abc', 'cwd': '/home/user/x'}
-            ],
-            'saved': []
-          });
-        }
-        return _json({});
+        if (req.url.path == '/api/sessions') sessionsUri = req.url;
+        return _okChain(req);
       }),
       probe: (uri, headers) async {
         probedUri = uri;
@@ -206,52 +303,41 @@ void main() {
     final outcome = await c
         .read(connectionNotifierProvider.notifier)
         .testConnection('https://gw.example.com', 'tok');
-    expect(outcome, 'Connection OK. HTTP and WebSocket both verified.');
+    expect(outcome, isA<TestOk>());
+    expect(outcome.message, 'Connection OK. HTTP and WebSocket both verified.');
     expect(probedUri.toString(), 'wss://gw.example.com/omp-ws/abc');
     expect(probedHeaders!['Authorization'], 'Bearer tok');
+    // include_saved must be sent explicitly (gateway defaults to true).
+    expect(sessionsUri!.queryParameters['include_saved'], 'false');
   });
 
   test('connection test without live sessions reports WS unverified',
       () async {
     final c = container(
       clientFactory: stubClient((req) async {
-        if (req.url.path == '/healthz') return _json({'ok': true});
-        if (req.url.path == '/api/me') return _json({'method': 'bearer'});
-        if (req.url.path == '/api/sessions') {
-          return _json({'live': [], 'saved': []});
-        }
-        return _json({});
+        if (req.url.path == '/api/sessions') return _json({'live': [], 'saved': []});
+        return _okChain(req);
       }),
     );
     await settle(c);
     final outcome = await c
         .read(connectionNotifierProvider.notifier)
         .testConnection('https://gw.example.com', 'tok');
-    expect(outcome, 'HTTP OK, WebSocket not verified (no live session).');
+    expect(outcome, isA<TestWsUnverified>());
+    expect(outcome.message, 'HTTP OK, WebSocket not verified (no live session).');
   });
 
-  test('connection test reports a failed WS leg distinctly', () async {
+  test('connection test reports a failed WS leg as TestWsFailed', () async {
     final c = container(
-      clientFactory: stubClient((req) async {
-        if (req.url.path == '/healthz') return _json({'ok': true});
-        if (req.url.path == '/api/me') return _json({'method': 'bearer'});
-        if (req.url.path == '/api/sessions') {
-          return _json({
-            'live': [
-              {'gwId': 'abc', 'cwd': '/home/user/x'}
-            ],
-            'saved': []
-          });
-        }
-        return _json({});
-      }),
+      clientFactory: stubClient((req) async => _okChain(req)),
       probe: (_, _) async => false,
     );
     await settle(c);
     final outcome = await c
         .read(connectionNotifierProvider.notifier)
         .testConnection('https://gw.example.com', 'tok');
-    expect(outcome,
+    expect(outcome, isA<TestWsFailed>());
+    expect(outcome.message,
         'HTTP OK, but the WebSocket failed. Proxies can pass HTTP and break WS.');
   });
 
@@ -259,5 +345,50 @@ void main() {
     final ok = await defaultWsProbe(
         Uri.parse('ws://127.0.0.1:1/omp-ws/x'), {'Authorization': 'Bearer t'});
     expect(ok, isFalse);
+  });
+
+  group('default ws probe against a real local websocket', () {
+    late HttpServer server;
+
+    setUp(() async {
+      server = await HttpServer.bind('127.0.0.1', 0);
+    });
+
+    tearDown(() async {
+      await server.close(force: true);
+    });
+
+    /// Accept the upgrade, optionally send a frame, then close with [code].
+    void serve({bool sendFrame = false, required int code}) {
+      server.listen((req) async {
+        final ws = await WebSocketTransformer.upgrade(req);
+        if (sendFrame) ws.add(jsonEncode({'type': 'auth_ok'}));
+        await ws.close(code, 'bye');
+      });
+    }
+
+    test('server close without a data frame counts as working', () async {
+      serve(code: 1000);
+      final ok = await defaultWsProbe(
+          Uri.parse('ws://127.0.0.1:${server.port}/omp-ws/x'),
+          {'Authorization': 'Bearer t'});
+      expect(ok, isTrue);
+    });
+
+    test('a data frame counts as working', () async {
+      serve(sendFrame: true, code: 1000);
+      final ok = await defaultWsProbe(
+          Uri.parse('ws://127.0.0.1:${server.port}/omp-ws/x'),
+          {'Authorization': 'Bearer t'});
+      expect(ok, isTrue);
+    });
+
+    test('close code 4401 (bad token) is a failure', () async {
+      serve(code: 4401);
+      final ok = await defaultWsProbe(
+          Uri.parse('ws://127.0.0.1:${server.port}/omp-ws/x'),
+          {'Authorization': 'Bearer wrong'});
+      expect(ok, isFalse);
+    });
   });
 }

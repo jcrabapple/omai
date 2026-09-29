@@ -48,11 +48,20 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
         );
   }
 
+  /// Colour by outcome class, never by sniffing the message: failure copy can
+  /// contain 'OK' (e.g. 'HTTP OK, but the WebSocket failed').
+  Color _outcomeColor(OmpTokens tokens, ConnectionTestResult outcome) => switch (outcome) {
+        TestOk() => tokens.ok,
+        TestWsUnverified() => tokens.warn,
+        TestWsFailed() => tokens.err,
+        TestError() => tokens.err,
+      };
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
     final state = ref.watch(connectionNotifierProvider);
-    final outcome = state.testOutcome;
+    final result = state.testResult;
 
     return OmpPage(
       title: 'Connect to ohmypi',
@@ -111,14 +120,12 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               ],
-              if (outcome != null) ...[
+              if (result != null) ...[
                 const SizedBox(height: OmpMetrics.s4),
-                Text(outcome,
-                    style: TextStyle(
-                        color: outcome.contains('OK')
-                            ? tokens.ok
-                            : tokens.err,
-                        fontSize: OmpMetrics.fsSm)),
+                Text(
+                  result.message,
+                  style: TextStyle(color: _outcomeColor(tokens, result), fontSize: OmpMetrics.fsSm),
+                ),
               ],
             ],
           ),

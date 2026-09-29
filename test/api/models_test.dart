@@ -62,6 +62,11 @@ void main() {
       final named = SessionInfo.fromJson({...fixture, 'ompSessionName': 'fix bug'});
       expect(named.title, 'fix bug');
     });
+
+    test('empty ompSessionName falls back to the cwd basename too', () {
+      final empty = SessionInfo.fromJson({...fixture, 'ompSessionName': ''});
+      expect(empty.title, 'ohmypi-gateway');
+    });
   });
 
   group('SavedSession', () {

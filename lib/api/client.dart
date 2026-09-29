@@ -104,6 +104,7 @@ class GatewayClient {
         contentType: res.headers['content-type'],
         bodyText: text,
         json: json,
+        headers: res.headers,
       );
     }
     return json ?? const <String, dynamic>{};
@@ -142,15 +143,16 @@ class GatewayClient {
       _send('GET', '/api/usage', timeout: const Duration(minutes: 2));
 
   /// Escape hatch: any omp RpcCommand, returned as `{data}`.
-  Future<Map<String, dynamic>> rpc(Map<String, dynamic> command) =>
-      _send('POST', '/api/rpc', body: command);
+  Future<Map<String, dynamic>> rpc(String id, Map<String, dynamic> command) =>
+      _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/rpc', body: command);
 
   // ------------------------------------------------------------- sessions
 
   Future<SessionsList> sessions({int limit = 60, bool includeSaved = true}) async {
     final json = await _send('GET', '/api/sessions', query: {
       'limit': '$limit',
-      if (includeSaved) 'include_saved': '1',
+      // Always explicit: the gateway defaults include_saved to True.
+      'include_saved': includeSaved ? 'true' : 'false',
     });
     return SessionsList.fromJson(json);
   }
@@ -196,6 +198,12 @@ class GatewayClient {
     await _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/abort');
   }
 
+  /// Ask omp to compact the session context. `instructions` steers what to keep.
+  Future<Map<String, dynamic>> compact(String id, {String? instructions}) =>
+      _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/compact', body: {
+        if (instructions != null && instructions.isNotEmpty) 'instructions': instructions,
+      });
+
   Future<Map<String, dynamic>> state(String id) =>
       _send('GET', '/api/sessions/${Uri.encodeComponent(id)}/state');
 
@@ -240,5 +248,3 @@ class GatewayClient {
         body: answer);
   }
 }
-
-String str(Object? v) => v is String ? v : '';

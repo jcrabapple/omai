@@ -31,17 +31,66 @@ Future<bool> defaultWsProbe(Uri uri, Map<String, String> headers) async {
   try {
     ws = await WebSocket.connect(uri.toString(), headers: headers)
         .timeout(const Duration(seconds: 10));
-    // Wait briefly for the server to speak (auth_ok or a close); either proves
-    // the WS leg works end to end.
-    await ws.first.timeout(const Duration(seconds: 10));
-    return true;
   } on TimeoutException {
     return false;
   } catch (_) {
     return false;
-  } finally {
-    await ws?.close();
   }
+  // Wait for the server to speak or close. `ws.first` throws StateError when
+  // the server closes without a data frame, so use listen(onData, onDone)
+  // instead and read the close code off the socket.
+  final done = Completer<bool>();
+  late final StreamSubscription<dynamic> sub;
+  sub = ws.listen(
+    (_) {
+      if (!done.isCompleted) done.complete(true);
+    },
+    onDone: () {
+      // A clean server close after a successful upgrade proves the WS leg
+      // works, except 4401: the gateway's "bad token" close.
+      if (!done.isCompleted) done.complete(ws?.closeCode != 4401);
+    },
+    onError: (Object _) {
+      if (!done.isCompleted) done.complete(false);
+    },
+    cancelOnError: true,
+  );
+  try {
+    return await done.future.timeout(const Duration(seconds: 10));
+  } on TimeoutException {
+    return false;
+  } finally {
+    await sub.cancel();
+    await ws.close();
+  }
+}
+
+/// Result of the three-legged connection test. Structured so the screen can
+/// colour it without sniffing the text ('OK' appears in failure copy too).
+sealed class ConnectionTestResult {
+  const ConnectionTestResult(this.message);
+  final String message;
+}
+
+/// HTTP and WebSocket both verified.
+class TestOk extends ConnectionTestResult {
+  const TestOk(super.message);
+}
+
+/// HTTP works; the WebSocket leg could not be checked (no live session, or
+/// the listing failed). Not a failure, but not a confirmation either.
+class TestWsUnverified extends ConnectionTestResult {
+  const TestWsUnverified(super.message);
+}
+
+/// HTTP works but the WebSocket leg failed: proxies can pass HTTP and break WS.
+class TestWsFailed extends ConnectionTestResult {
+  const TestWsFailed(super.message);
+}
+
+/// The gateway rejected the token, locked the IP out, or was unreachable.
+class TestError extends ConnectionTestResult {
+  const TestError(super.message);
 }
 
 /// One saved gateway connection.
@@ -50,7 +99,7 @@ class ConnectionState {
     this.connections = const [],
     this.activeId,
     this.busy = false,
-    this.testOutcome,
+    this.testResult,
   });
 
   final List<ConnectionRecord> connections;
@@ -59,8 +108,8 @@ class ConnectionState {
   /// True while loading state or running a connection test.
   final bool busy;
 
-  /// Copy shown on the Connect screen after a test. Null clears it.
-  final String? testOutcome;
+  /// Outcome shown on the Connect screen after a test. Null clears it.
+  final ConnectionTestResult? testResult;
 
   ConnectionRecord? get active =>
       connections.isEmpty ? null : connections.where((c) => c.id == activeId).firstOrNull;
@@ -72,14 +121,14 @@ class ConnectionState {
     String? activeId,
     bool clearActiveId = false,
     bool? busy,
-    String? testOutcome,
-    bool clearTestOutcome = false,
+    ConnectionTestResult? testResult,
+    bool clearTestResult = false,
   }) {
     return ConnectionState(
       connections: connections ?? this.connections,
       activeId: clearActiveId ? null : (activeId ?? this.activeId),
       busy: busy ?? this.busy,
-      testOutcome: clearTestOutcome ? null : (testOutcome ?? this.testOutcome),
+      testResult: clearTestResult ? null : (testResult ?? this.testResult),
     );
   }
 }
@@ -92,9 +141,15 @@ class SignedIn {
 }
 
 class ConnectionNotifier extends Notifier<ConnectionState> {
+  /// Completes once the initial load has applied its state. Sign-in and
+  /// sign-out await it so they never race a pending load (which used to
+  /// overwrite the freshly signed-in connection when it finished late).
+  Future<void> get _settled => _loadFuture ?? Future<void>.value();
+  Future<void>? _loadFuture;
+
   @override
   ConnectionState build() {
-    _load();
+    _loadFuture = _load();
     return const ConnectionState(busy: true);
   }
 
@@ -103,6 +158,7 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
 
   Future<void> _load() async {
     final connections = await _prefs.load();
+    if (!ref.mounted) return;
     if (connections.isEmpty) {
       state = state.copyWith(connections: const [], clearActiveId: true, busy: false);
       return;
@@ -110,6 +166,7 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     // The most recently added connection is the default.
     var activeId = connections.last.id;
     final token = await _tokens.read(activeId);
+    if (!ref.mounted) return;
     if (token == null || token.isEmpty) activeId = '';
     state = state.copyWith(
       connections: connections,
@@ -119,53 +176,54 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
   }
 
   /// Runs the three-legged connection test: /healthz, /api/me, then a
-  /// WebSocket probe against a live session when one exists. Returns copy for
-  /// the screen; failure classes each get their own line.
-  Future<String> testConnection(String url, String token) async {
+  /// WebSocket probe against a live session when one exists. Returns a
+  /// structured outcome; failure classes each get their own line.
+  Future<ConnectionTestResult> testConnection(String url, String token) async {
     final clean = url.trim().replaceAll(RegExp(r'/+$'), '');
-    if (clean.isEmpty) return 'Enter the gateway URL first.';
-    if (token.trim().isEmpty) return 'Enter the gateway token first.';
-    state = state.copyWith(busy: true, clearTestOutcome: true);
-    final outcome = await _runTest(clean, token.trim());
-    state = state.copyWith(busy: false, testOutcome: outcome);
-    return outcome;
+    if (clean.isEmpty) return const TestError('Enter the gateway URL first.');
+    if (token.trim().isEmpty) return const TestError('Enter the gateway token first.');
+    state = state.copyWith(busy: true, clearTestResult: true);
+    final result = await _runTest(clean, token.trim());
+    if (!ref.mounted) return result;
+    state = state.copyWith(busy: false, testResult: result);
+    return result;
   }
 
-  Future<String> _runTest(String url, String token) async {
+  Future<ConnectionTestResult> _runTest(String url, String token) async {
     final make = ref.read(gatewayClientFactoryProvider);
     final client = make(url, token);
     try {
       await client.healthz();
     } on AuthError {
-      return 'The gateway rejected the token. Check it and try again.';
+      return const TestError('The gateway rejected the token. Check it and try again.');
     } on LockedOut {
-      return 'Too many failed attempts. This IP is locked out for a while.';
+      return const TestError('Too many failed attempts. This IP is locked out for a while.');
     } on EdgeRefused {
-      return 'The edge (Cloudflare) refused the request. Check the URL.';
+      return const TestError('The edge (Cloudflare) refused the request. Check the URL.');
     } on Offline {
-      return 'Could not reach the gateway. Check the URL and your network.';
+      return const TestError('Could not reach the gateway. Check the URL and your network.');
     } on GatewayClientError catch (e) {
-      return 'The gateway answered with an error: ${e.message}';
+      return TestError('The gateway answered with an error: ${e.message}');
     }
     try {
       await client.me();
     } on AuthError {
-      return 'The gateway rejected the token. Check it and try again.';
+      return const TestError('The gateway rejected the token. Check it and try again.');
     } on LockedOut {
-      return 'Too many failed attempts. This IP is locked out for a while.';
+      return const TestError('Too many failed attempts. This IP is locked out for a while.');
     } on EdgeRefused {
-      return 'The edge (Cloudflare) refused the request. Check the URL.';
+      return const TestError('The edge (Cloudflare) refused the request. Check the URL.');
     } on Offline {
-      return 'Reached the gateway but the API call timed out. Try again.';
+      return const TestError('Reached the gateway but the API call timed out. Try again.');
     } on GatewayClientError catch (e) {
-      return 'The gateway answered with an error: ${e.message}';
+      return TestError('The gateway answered with an error: ${e.message}');
     }
 
     // WebSocket leg: probe a live session if there is one, else say so.
     try {
       final list = await client.sessions(limit: 1, includeSaved: false);
       if (list.live.isEmpty) {
-        return 'HTTP OK, WebSocket not verified (no live session).';
+        return const TestWsUnverified('HTTP OK, WebSocket not verified (no live session).');
       }
       final id = list.live.first.gwId;
       final probe = ref.read(wsProbeProvider);
@@ -174,10 +232,10 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
         {'Authorization': 'Bearer $token'},
       );
       return ok
-          ? 'Connection OK. HTTP and WebSocket both verified.'
-          : 'HTTP OK, but the WebSocket failed. Proxies can pass HTTP and break WS.';
+          ? const TestOk('Connection OK. HTTP and WebSocket both verified.')
+          : const TestWsFailed('HTTP OK, but the WebSocket failed. Proxies can pass HTTP and break WS.');
     } on GatewayClientError catch (e) {
-      return 'HTTP OK, WebSocket not verified (listing sessions failed: ${e.message}).';
+      return TestWsUnverified('HTTP OK, WebSocket not verified (listing sessions failed: ${e.message}).');
     }
   }
 
@@ -188,46 +246,62 @@ class ConnectionNotifier extends Notifier<ConnectionState> {
     required String label,
     required String token,
   }) async {
+    await _settled;
+    if (!ref.mounted) throw StateError('ConnectionNotifier was disposed during sign in.');
     final clean = url.trim().replaceAll(RegExp(r'/+$'), '');
-    final id = _idFor(clean);
-    final record = ConnectionRecord(id: id, url: clean, label: label.trim());
+    // Reuse the permanent id when this URL already has a record; create one
+    // random id for a genuinely new connection. Ids never derive from other
+    // connections in state, so the secure-storage token key cannot drift.
+    final existing = state.connections.where((c) => _sameUrl(c.url, clean)).firstOrNull;
+    final record = existing != null
+        ? ConnectionRecord(id: existing.id, url: clean, label: label.trim())
+        : ConnectionRecord.create(url: clean, label: label.trim());
     final connections = [
-      ...state.connections.where((c) => c.id != id),
+      ...state.connections.where((c) => c.id != record.id),
       record,
     ];
     await _prefs.save(connections);
-    await _tokens.write(id, token.trim());
+    if (!ref.mounted) throw StateError('ConnectionNotifier was disposed during sign in.');
+    await _tokens.write(record.id, token.trim());
+    if (!ref.mounted) throw StateError('ConnectionNotifier was disposed during sign in.');
     state = state.copyWith(
       connections: connections,
-      activeId: id,
+      activeId: record.id,
       busy: false,
-      clearTestOutcome: true,
+      clearTestResult: true,
     );
     return SignedIn(record, token.trim());
   }
 
   Future<void> signOut() async {
+    await _settled;
+    if (!ref.mounted) return;
     final active = state.active;
     if (active != null) {
-      await _tokens.delete(active.id);
       final connections =
           state.connections.where((c) => c.id != active.id).toList();
+      // Update state first: the UI must not depend on how long storage takes.
+      state = state.copyWith(
+          connections: connections, clearActiveId: true, clearTestResult: true);
+      await _tokens.delete(active.id);
+      if (!ref.mounted) return;
       await _prefs.save(connections);
-      state = state.copyWith(connections: connections, clearActiveId: true);
+      return;
     }
-    state = state.copyWith(clearTestOutcome: true);
+    state = state.copyWith(clearTestResult: true);
   }
 
-  /// Stable, non-secret id from the URL: host + port (+ path hash on clash).
-  String _idFor(String url) {
-    final uri = Uri.tryParse(url);
-    final host = uri?.host ?? url;
-    final port = (uri?.hasPort ?? false) ? ':${uri!.port}' : '';
-    var id = '$host$port';
-    if (state.connections.any((c) => c.id == id && c.url != url)) {
-      id = '$id-${url.hashCode.toUnsigned(16).toRadixString(16)}';
+  /// Normalised URL comparison: scheme and host case-insensitive, trailing
+  /// slashes and default port ignored.
+  bool _sameUrl(String a, String b) => _normalizeUrl(a) == _normalizeUrl(b);
+
+  String _normalizeUrl(String url) {
+    var u = url.trim().replaceAll(RegExp(r'/+$'), '');
+    final schemeEnd = u.indexOf('://');
+    if (schemeEnd > 0) {
+      u = '${u.substring(0, schemeEnd).toLowerCase()}${u.substring(schemeEnd)}';
     }
-    return id;
+    return u.replaceFirst(RegExp(r':80/'), '/').replaceFirst(RegExp(r':443/'), '/');
   }
 }
 

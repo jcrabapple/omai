@@ -181,8 +181,13 @@ class SessionInfo {
   final bool alreadyLive;
   final bool cwdFallback;
 
-  /// Title shown in lists: the session name, else the cwd basename.
-  String get title => ompSessionName ?? cwd.split('/').where((s) => s.isNotEmpty).lastOrNull ?? cwd;
+  /// Title shown in lists: the session name, else the cwd basename. The
+  /// gateway can report ompSessionName as '' when no name was set.
+  String get title {
+    final name = ompSessionName;
+    if (name != null && name.isNotEmpty) return name;
+    return cwd.split('/').where((s) => s.isNotEmpty).lastOrNull ?? cwd;
+  }
 }
 
 /// A transcript on disk that can be resumed. `cwd` is null for older files;

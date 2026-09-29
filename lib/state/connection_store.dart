@@ -4,12 +4,18 @@
 // beyond the plugins themselves.
 
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ConnectionRecord {
   const ConnectionRecord({required this.id, required this.url, required this.label});
+
+  /// New record with a permanent random id (16 hex chars from Random.secure).
+  /// The id never changes afterwards: secure-storage token keys depend on it.
+  factory ConnectionRecord.create({required String url, required String label}) =>
+      ConnectionRecord(id: randomConnectionId(), url: url, label: label);
 
   factory ConnectionRecord.fromJson(Map<String, dynamic> json) {
     return ConnectionRecord(
@@ -27,6 +33,13 @@ class ConnectionRecord {
 
   ConnectionRecord copyWith({String? label}) =>
       ConnectionRecord(id: id, url: url, label: label ?? this.label);
+}
+
+/// 16 random hex chars. Generated once when a [ConnectionRecord] is created
+/// and never derived from other state, so token keys cannot drift.
+String randomConnectionId() {
+  final rng = Random.secure();
+  return List.generate(8, (_) => rng.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
 }
 
 /// Persistence seam so tests run against in-memory maps.
