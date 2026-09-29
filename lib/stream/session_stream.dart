@@ -9,7 +9,7 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show WebSocket;
+import 'dart:io' show WebSocket, WebSocketException;
 import 'dart:math' show Random;
 
 import '../wire/wire.dart';
@@ -133,7 +133,7 @@ class SessionStream {
   SessionStream({
     required this.gwId,
     required String baseUrl,
-    required this.token,
+    required String token,
     int? after,
     StreamTuning? tuning,
     this.handlers = const StreamHandlers(),
@@ -141,16 +141,19 @@ class SessionStream {
     SocketFactory? socketFactory,
     Scheduler? scheduler,
   })  : _wsBase = _wsOrigin(baseUrl),
-        cursor = after ?? 0,
+        _cursor = after ?? 0,
+        // A named parameter cannot be private, so `this._token` is impossible.
+        // ignore: prefer_initializing_formals
+        _token = token,
         _tune = tuning ?? defaultTuning,
         _random = random ?? _defaultRandom,
         _makeSocket = socketFactory ?? _ioSocketFactory,
         _sched = scheduler ?? const SystemScheduler();
 
   final String gwId;
-  final String token;
   final StreamHandlers handlers;
-  int cursor;
+  final String _token;
+  int _cursor;
 
   final String _wsBase;
   final StreamTuning _tune;
@@ -176,7 +179,10 @@ class SessionStream {
   CancelTimer? _holdTimer;
   CancelTimer? _watchdog;
 
-  int get lastSeq => cursor;
+  int get lastSeq => _cursor;
+
+  /// Read-only view of the resume cursor for state controllers.
+  int get cursor => _cursor;
   StreamState get state => _status.state;
   int? get retryAt => _status.retryAt;
   String? get message => _status.message;
@@ -188,7 +194,7 @@ class SessionStream {
     _started = true;
     _paused = false;
     _pausedAt = null;
-    connect();
+    _connect();
   }
 
   void stop() {
@@ -213,6 +219,8 @@ class SessionStream {
     _pausedAt = _ms();
     _clearRetry();
     _clearLive();
+    _clearHold();
+    _held = null;
     _dropSocket();
     if (_status.state != StreamState.gone) {
       _setStatus(StreamState.offline, null, _status.message);
@@ -253,14 +261,14 @@ class SessionStream {
     _clearRetry();
     _clearLive();
     _dropSocket();
-    connect();
+    _connect();
   }
 
   /// Call after refetching state and messages in response to `onResync` (or
   /// any time the caller holds a snapshot taken at [seq]). Raises the cursor
   /// and releases held events.
   void rebase(int seq) {
-    if (seq > cursor) cursor = seq;
+    if (seq > _cursor) _cursor = seq;
     _release();
   }
 
@@ -275,12 +283,12 @@ class SessionStream {
 
   // ------------------------------------------------------------- connection
 
-  void connect() {
+  void _connect() {
     if (!_started) return;
     _clearRetry();
     _setStatus(StreamState.connecting, null, _status.message);
     final url = Uri.parse(
-        '$_wsBase/omp-ws/${Uri.encodeComponent(gwId)}?after=$cursor');
+        '$_wsBase/omp-ws/${Uri.encodeComponent(gwId)}?after=$_cursor');
     _gen++;
     final gen = _gen;
     _makeSocket(url, _headers()).then((sock) {
@@ -288,6 +296,7 @@ class SessionStream {
         sock.close();
         return;
       }
+      _ws = sock;
       sock.onData = (data) {
         if (identical(_ws, sock)) _onFrame(data);
       };
@@ -296,13 +305,30 @@ class SessionStream {
         _ws = null;
         _onClose(code, reason);
       };
-      _ws = sock;
     }).catchError((Object e) {
+      // A stale generation (reconnectNow/pause/watchdog moved on) must not
+      // schedule anything: its retry could later drop the live socket.
+      if (gen != _gen || !_started || _paused) return;
+      // The gateway closes 4429 BEFORE accepting the upgrade, which uvicorn
+      // surfaces as an HTTP 403 on the handshake: route it to the lockout
+      // path exactly like a post-accept 4429 close.
+      if (_isUpgradeRejectedWith(e, 403)) {
+        _enterLockout(null);
+        return;
+      }
       _scheduleRetry();
     });
   }
 
-  Map<String, String> _headers() => {'Authorization': 'Bearer $token'};
+  Map<String, String> _headers() => {'Authorization': 'Bearer $_token'};
+
+  /// dart:io rejects a failed websocket upgrade with a [WebSocketException]
+  /// whose toString carries the HTTP status:
+  /// `WebSocketException: Connection to '...' was not upgraded to websocket,
+  /// HTTP status code: 403`.
+  static bool _isUpgradeRejectedWith(Object e, int status) =>
+      e is WebSocketException &&
+      e.toString().endsWith('HTTP status code: $status');
 
   static String _wsOrigin(String baseUrl) {
     final base = baseUrl.replaceAll(RegExp(r'/+$'), '');
@@ -344,15 +370,7 @@ class SessionStream {
         handlers.onGone?.call();
         return;
       case 4429:
-        _lockedUntil = _ms() + _tune.lockoutRetryMs;
-        _status = StreamStatus(
-          state: _status.state,
-          retryAt: _status.retryAt,
-          message: reason.isNotEmpty
-              ? reason
-              : 'Too many failed attempts. Retrying in a minute.',
-        );
-        _scheduleRetry(_tune.lockoutRetryMs);
+        _enterLockout(reason);
         return;
       case 4408:
         // Dropped as a slow consumer: come straight back, but only the first
@@ -378,8 +396,22 @@ class SessionStream {
     _setStatus(StreamState.retrying, retryAt, _status.message);
     _retryTimer = _sched.delay(Duration(milliseconds: delay), () {
       _retryTimer = null;
-      connect();
+      _connect();
     });
+  }
+
+  /// The gateway rate-limited us (close 4429, or the pre-accept 4429 that
+  /// surfaces as HTTP 403 on the upgrade): back off for a minute.
+  void _enterLockout(String? reason) {
+    _lockedUntil = _ms() + _tune.lockoutRetryMs;
+    _status = StreamStatus(
+      state: _status.state,
+      retryAt: _status.retryAt,
+      message: reason?.isNotEmpty == true
+          ? reason
+          : 'Too many failed attempts. Retrying in a minute.',
+    );
+    _scheduleRetry(_tune.lockoutRetryMs);
   }
 
   // ---------------------------------------------------------------- frames
@@ -401,12 +433,12 @@ class SessionStream {
     final seq = seqField is num ? seqField.toInt() : 0;
 
     if (seq > 0) {
-      if (seq <= cursor) return;
+      if (seq <= _cursor) return;
       if (_held != null) {
         _held![seq] = event;
         return;
       }
-      cursor = seq;
+      _cursor = seq;
       handlers.onEvent?.call(event, seq);
       return;
     }
@@ -426,6 +458,9 @@ class SessionStream {
   void _onAuthOk(Map<String, Object?> frame) {
     _setStatus(StreamState.live, null, null);
     _clearLive();
+    // A retry from an earlier attempt may still be pending: going live
+    // cancels it, or its fire would drop this healthy socket.
+    _clearRetry();
     _lastFrameAt = _ms();
     _stableTimer = _sched.delay(Duration(milliseconds: _tune.stableMs), () {
       _stableTimer = null;
@@ -434,7 +469,9 @@ class SessionStream {
     _watchdog =
         _sched.period(Duration(milliseconds: _watchdogTickMs), _checkWatchdog);
     handlers.onControl?.call(frame);
-    if (frame['gap'] == true) _requestResync(ResyncReason.gap);
+    if (frame['gap'] == true && _started && !_paused) {
+      _requestResync(ResyncReason.gap);
+    }
   }
 
   void _checkWatchdog() {
@@ -450,7 +487,7 @@ class SessionStream {
   // ---------------------------------------------------------------- resync
 
   void _requestResync(ResyncReason reason) {
-    if (_held != null) return;
+    if (!_started || _paused || _held != null) return;
     _held = <int, OmpEvent>{};
     _holdTimer = _sched.delay(
         Duration(milliseconds: _tune.holdTimeoutMs), _release);
@@ -464,8 +501,10 @@ class SessionStream {
     if (buf == null) return;
     final seqs = buf.keys.toList()..sort();
     for (final seq in seqs) {
-      if (seq <= cursor) continue;
-      cursor = seq;
+      // stop()/pause() during dispatch drops the rest of the buffer.
+      if (!_started || _paused) break;
+      if (seq <= _cursor) continue;
+      _cursor = seq;
       handlers.onEvent?.call(buf[seq]!, seq);
     }
   }

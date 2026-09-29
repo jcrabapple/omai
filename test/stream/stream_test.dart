@@ -2,6 +2,8 @@
 // the WebSocket transport. Browser visibility/online handling is replaced by
 // the explicit pause()/resume()/networkAvailable() lifecycle methods, and
 // fake timers by FakeScheduler.
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ohmypi/stream/session_stream.dart';
 import 'package:ohmypi/wire/wire.dart';
@@ -506,12 +508,18 @@ void main() {
       r.stream.start();
       await r.sched.micro();
       r.last.authOk();
+      r.last.frame(1, ev());
       r.stream.pause();
       await r.sched.elapse(4 * 60000);
-      r.last.frame(0, {'type': 'heartbeat'});
       r.stream.resume();
       await r.sched.micro();
       expect(r.resyncs, isEmpty);
+      expect(r.sockets, hasLength(2));
+      expect(r.last.url.toString(), contains('after=1'));
+      r.last.authOk();
+      expect(r.stream.state, StreamState.live);
+      r.last.frame(2, ev());
+      expect(r.events, [1, 2]);
       r.stream.stop();
     });
   });
@@ -621,6 +629,186 @@ void main() {
       r.last.frame(3, ev('b'));
       r.stream.rebase(1);
       expect(r.events, [3]);
+      r.stream.stop();
+    });
+  });
+
+  group('stale connect failures (Gemini findings)', () {
+    test('a connect failure from a stale generation schedules nothing', () async {
+      final sched = FakeScheduler();
+      final sockets = <FakeSocket>[];
+      final pending = <Completer<FakeSocket>>[];
+      final stream = SessionStream(
+        gwId: 'abc',
+        baseUrl: 'http://gw.test',
+        token: 'tok',
+        random: () => 0.5,
+        socketFactory: (url, headers) {
+          final c = Completer<FakeSocket>();
+          pending.add(c);
+          return c.future;
+        },
+        scheduler: sched,
+      );
+      stream.start();
+      await sched.micro();
+      expect(pending, hasLength(1));
+      stream.reconnectNow(); // bumps _gen and starts attempt #2
+      await sched.micro();
+      expect(pending, hasLength(2));
+      final sock = FakeSocket(Uri.parse('ws://gw.test'), {});
+      sockets.add(sock);
+      pending[1].complete(sock);
+      await sched.micro();
+      expect(sockets, hasLength(1));
+      sock.authOk();
+      // Fail the stale attempt #1: must not schedule a retry.
+      pending[0].completeError(StateError('stale handshake failed'));
+      await sched.micro();
+      // Inside the watchdog window (60 s) but far past any retry delay: if a
+      // retry had been scheduled by the stale failure, a socket would open.
+      await sched.elapse(59000);
+      expect(sockets, hasLength(1));
+      expect(stream.state, StreamState.live);
+      stream.stop();
+    });
+
+    test('pause clears the hold so a later resync can be requested again',
+        () async {
+      final r = rig();
+      r.stream.start();
+      await r.sched.micro();
+      r.last.authOk(gap: true);
+      expect(r.resyncs, [ResyncReason.gap]);
+      r.last.frame(10, ev());
+      r.stream.pause();
+      await r.sched.elapse(30000); // longer than holdTimeoutMs
+      r.stream.resume();
+      await r.sched.micro();
+      // The stale hold was dropped at pause, so a new gap requests a resync
+      // instead of being silently swallowed.
+      r.last.authOk(gap: true);
+      expect(r.resyncs, [ResyncReason.gap, ResyncReason.gap]);
+      expect(r.events, isEmpty); // held again, nothing leaked while paused
+      r.stream.stop();
+    });
+
+    test('the hold timer cannot fire while paused', () async {
+      final r = rig(tuning: const StreamTuning(holdTimeoutMs: 1000));
+      r.stream.start();
+      await r.sched.micro();
+      r.last.authOk(gap: true);
+      expect(r.resyncs, [ResyncReason.gap]);
+      r.last.frame(10, ev());
+      r.stream.pause();
+      await r.sched.elapse(5000);
+      expect(r.events, isEmpty); // released hold never dispatches
+      r.stream.resume();
+      await r.sched.micro();
+      expect(r.events, isEmpty);
+      r.stream.stop();
+    });
+
+    Rig rigStoppingFromEvent(void Function(Rig r, int seq) action) {
+      final r = Rig();
+      r.sched = FakeScheduler();
+      r.stream = SessionStream(
+        gwId: 'abc',
+        baseUrl: 'http://gw.test',
+        token: 'tok',
+        random: () => 0.5,
+        socketFactory: (url, headers) async {
+          final s = FakeSocket(url, headers);
+          r.sockets.add(s);
+          return s;
+        },
+        scheduler: r.sched,
+        handlers: StreamHandlers(
+          onEvent: (e, seq) {
+            r.events.add(seq);
+            action(r, seq);
+          },
+          onState: (s) => r.states.add(s),
+          onResync: (reason) => r.resyncs.add(reason),
+        ),
+      );
+      return r;
+    }
+
+    test('release stops dispatching when the handler stops the stream',
+        () async {
+      final r = rigStoppingFromEvent((r, seq) {
+        if (seq == 2) r.stream.stop();
+      });
+      r.stream.start();
+      await r.sched.micro();
+      r.last.authOk(gap: true);
+      r.last.frame(1, ev('a'));
+      r.last.frame(2, ev('b'));
+      r.last.frame(3, ev('c'));
+      r.stream.rebase(0);
+      expect(r.events, [1, 2]);
+      expect(r.stream.state, StreamState.offline);
+    });
+
+    test('release stops dispatching when the handler pauses the stream',
+        () async {
+      final r = rigStoppingFromEvent((r, seq) {
+        if (seq == 2) r.stream.pause();
+      });
+      r.stream.start();
+      await r.sched.micro();
+      r.last.authOk(gap: true);
+      r.last.frame(1, ev('a'));
+      r.last.frame(2, ev('b'));
+      r.last.frame(3, ev('c'));
+      r.stream.rebase(0);
+      expect(r.events, [1, 2]);
+      expect(r.stream.state, StreamState.offline);
+    });
+
+    test('a control-frame stop cancels the pending gap resync', () async {
+      final r = Rig();
+      r.sched = FakeScheduler();
+      r.stream = SessionStream(
+        gwId: 'abc',
+        baseUrl: 'http://gw.test',
+        token: 'tok',
+        random: () => 0.5,
+        socketFactory: (url, headers) async {
+          final s = FakeSocket(url, headers);
+          r.sockets.add(s);
+          return s;
+        },
+        scheduler: r.sched,
+        handlers: StreamHandlers(
+          onEvent: (e, seq) => r.events.add(seq),
+          onResync: (reason) => r.resyncs.add(reason),
+        ),
+      );
+      r.stream.start();
+      await r.sched.micro();
+      r.last.authOk(gap: true);
+      expect(r.resyncs, [ResyncReason.gap]);
+      // stop() during the hold must cancel it without dispatching.
+      r.last.frame(1, ev());
+      r.stream.stop();
+      await r.sched.elapse(30000);
+      expect(r.events, isEmpty);
+    });
+
+    test('cursor is readable; the resume URL tracks it', () async {
+      final r = rig(after: 3);
+      r.stream.start();
+      await r.sched.micro();
+      expect(r.stream.cursor, 3);
+      r.last.authOk();
+      r.last.frame(4, ev());
+      expect(r.stream.cursor, 4);
+      expect(r.stream.lastSeq, 4);
+      r.last.serverClose(1006);
+      await r.sched.elapse(500);
+      expect(r.last.url.toString(), contains('after=4'));
       r.stream.stop();
     });
   });
