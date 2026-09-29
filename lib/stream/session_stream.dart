@@ -147,7 +147,7 @@ class SessionStream {
         _token = token,
         _tune = tuning ?? defaultTuning,
         _random = random ?? _defaultRandom,
-        _makeSocket = socketFactory ?? _ioSocketFactory,
+        _makeSocket = socketFactory ?? ioSocketFactory,
         _sched = scheduler ?? const SystemScheduler();
 
   final String gwId;
@@ -333,12 +333,6 @@ class SessionStream {
   static String _wsOrigin(String baseUrl) {
     final base = baseUrl.replaceAll(RegExp(r'/+$'), '');
     return base.replaceFirst(RegExp('^http'), 'ws');
-  }
-
-  static Future<StreamSocket> _ioSocketFactory(
-      Uri url, Map<String, String> headers) async {
-    final ws = await WebSocket.connect(url.toString(), headers: headers);
-    return _IoStreamSocket(ws);
   }
 
   void _dropSocket() {
@@ -557,6 +551,14 @@ int _pow2(int n) {
 int _min(int a, int b) => a < b ? a : b;
 
 double _defaultRandom() => Random().nextDouble();
+
+/// The real dart:io socket factory: opens `/omp-ws/{id}` with the bearer
+/// header. The single implementation; consumers inject it (or a fake).
+Future<StreamSocket> ioSocketFactory(
+    Uri url, Map<String, String> headers) async {
+  final ws = await WebSocket.connect(url.toString(), headers: headers);
+  return _IoStreamSocket(ws);
+}
 
 class _IoStreamSocket implements StreamSocket {
   _IoStreamSocket(this._ws) {

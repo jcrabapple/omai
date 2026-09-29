@@ -13,6 +13,7 @@ Versions pinned exactly in `pubspec.yaml`.
 | `http` | REST client. Small, `MockClient` makes every error path testable. |
 | `flutter_secure_storage` | Gateway token in the Android Keystore, never plain prefs (CLIENTS.md). |
 | `shared_preferences` | Non-secret settings: connection list, theme, drafts index. |
+| `flutter_markdown_plus` | Markdown rendering for assistant messages. Maintained fork of the archived `flutter_markdown`; pinned to the exact version so rendering stays reproducible. |
 | `mocktail` (dev) | Mocks for notifier and client tests. |
 
 ## Layout
