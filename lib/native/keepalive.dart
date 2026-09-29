@@ -254,6 +254,11 @@ class KeepaliveCoordinator {
 
   bool _backgrounded = false;
   bool _serviceActive = false;
+
+  /// The runtime permission dialog can only appear while the app is on
+  /// screen, so it is asked once, the first time a followed turn runs in the
+  /// foreground, not at the moment of backgrounding.
+  bool _permissionAsked = false;
   String? _lastTool;
   int _lastUpdateMs = 0;
   Timer? _tick;
@@ -269,6 +274,10 @@ class KeepaliveCoordinator {
   /// Feed the latest open-session state (called on every controller change).
   void update(KeepaliveSnapshot snapshot) {
     _latest = snapshot;
+    if (snapshot.running && !_backgrounded && !_permissionAsked) {
+      _permissionAsked = true;
+      unawaited(surface.ensureNotificationPermission());
+    }
     if (!_serviceActive) return;
     if (!snapshot.running) {
       unawaited(_turnEnded());
