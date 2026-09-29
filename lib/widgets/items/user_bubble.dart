@@ -16,7 +16,10 @@ const Map<UserNote, String> _noteLabels = {
 class UserBubble extends StatelessWidget {
   final UserItem item;
 
-  const UserBubble({super.key, required this.item});
+  /// Present on a failed send: draws the Retry affordance under the bubble.
+  final void Function(UserItem item)? onRetry;
+
+  const UserBubble({super.key, required this.item, this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -97,14 +100,21 @@ class UserBubble extends StatelessWidget {
                 ),
               ),
             ),
-            if (item.failed == true)
+            if (item.failed == true) ...[
               _Note(
                 text:
                     'Not sent${item.error != null ? ': ${item.error}' : ''}',
                 color: t.err,
                 stale: item.stale == true,
-              )
-            else if (item.pending && item.note == 'steer-pending')
+              ),
+              if (onRetry != null)
+                TextButton.icon(
+                  onPressed: () => onRetry!(item),
+                  icon: Icon(Icons.refresh, size: 16, color: t.err),
+                  label: Text('Retry',
+                      style: TextStyle(color: t.err, fontSize: OmpMetrics.fsSm)),
+                ),
+            ] else if (item.pending && item.note == 'steer-pending')
               const _Note(text: 'pending')
             else if (item.note == 'queued')
               _Note(text: 'Queued', stale: item.stale == true)

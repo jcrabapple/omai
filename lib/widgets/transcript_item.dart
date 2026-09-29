@@ -18,7 +18,11 @@ class TranscriptItemCallbacks {
   final void Function(String href)? onLinkTap;
   final void Function(Object? raw)? onInspect;
 
-  const TranscriptItemCallbacks({this.onLinkTap, this.onInspect});
+  /// Retry a failed local send: called with the bubble's text.
+  final void Function(UserItem item)? onRetrySend;
+
+  const TranscriptItemCallbacks(
+      {this.onLinkTap, this.onInspect, this.onRetrySend});
 }
 
 class TranscriptItemView extends StatelessWidget {
@@ -40,7 +44,9 @@ class TranscriptItemView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final it = item;
-    if (it is UserItem) return UserBubble(item: it);
+    if (it is UserItem) {
+      return UserBubble(item: it, onRetry: callbacks.onRetrySend);
+    }
     if (it is AssistantItem) {
       return AssistantMessage(item: it, onLinkTap: callbacks.onLinkTap);
     }

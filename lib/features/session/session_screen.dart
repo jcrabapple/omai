@@ -12,7 +12,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../state/session_controller.dart';
 import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
-import 'pending_approval_banner.dart';
+import 'approval_panel.dart';
+import 'composer.dart';
 import 'session_header.dart';
 import 'transcript_list.dart';
 
@@ -79,9 +80,21 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
               Expanded(
                 child: TranscriptList(state: state),
               ),
-              // Approvals sit above the (future) composer. D2 wires buttons.
+              // Blocking dialogs take over the composer slot; non-blocking
+              // notify requests never reach pendingUi (the reducer filters).
               if (state.pendingUi.isNotEmpty)
-                PendingApprovalBanner(request: state.pendingUi.first),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
+                  child: ApprovalPanel(
+                    gwId: widget.gwId,
+                    request: state.pendingUi.first,
+                    index: 1,
+                    total: state.pendingUi.length,
+                  ),
+                )
+              else
+                SessionComposer(gwId: widget.gwId),
             ],
           ),
       },

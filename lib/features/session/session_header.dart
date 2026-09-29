@@ -15,6 +15,7 @@ import '../../state/session_controller.dart';
 import '../../stream/session_stream.dart' show StreamState, StreamStatus;
 import '../../theme/tokens.dart';
 import 'context_meter.dart';
+import 'session_actions.dart';
 
 class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
   const SessionHeader({super.key, required this.gwId});
@@ -41,6 +42,7 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
       elevation: 0,
       toolbarHeight: kToolbarHeight + 26,
       leading: const BackButton(),
+      actions: [SessionActions(gwId: gwId)],
       titleSpacing: 0,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

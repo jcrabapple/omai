@@ -18,11 +18,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/client.dart';
 import '../api/errors.dart';
 import '../api/models.dart' show SessionInfo, rawMapList;
+import '../composer/slash.dart' show SlashCommand;
 import '../stream/scheduler.dart';
 import '../stream/session_stream.dart';
 import '../transcript/reducer.dart';
 import '../wire/wire.dart' show OmpEvent, UiRequest;
 import 'connection_notifier.dart';
+import 'reviewed_store.dart';
 import 'sessions_store.dart';
 
 enum SessionPhase { idle, loading, ready, gone, error }
@@ -60,6 +62,7 @@ class SessionState {
     this.wsError,
     this.stats,
     this.commands = const [],
+    this.slashCommands = const [],
     this.queued = 0,
     this.activity,
   }) : transcript = transcript ?? emptyTranscript();
@@ -81,6 +84,11 @@ class SessionState {
 
   /// Slash commands from /commands.
   final List<String> commands;
+
+  /// The same commands with their full shape (source, description, aliases,
+  /// input hint), for the slash menu. Kept next to [commands] so existing
+  /// consumers of the name list keep working.
+  final List<SlashCommand> slashCommands;
 
   /// Messages omp is holding for after the current turn (from /state).
   final int queued;
@@ -104,6 +112,7 @@ class SessionState {
     bool clearWsError = false,
     Map<String, Object?>? stats,
     List<String>? commands,
+    List<SlashCommand>? slashCommands,
     int? queued,
     ActivitySummary? activity,
     bool clearActivity = false,
@@ -118,6 +127,7 @@ class SessionState {
       wsError: clearWsError ? null : (wsError ?? this.wsError),
       stats: stats ?? this.stats,
       commands: commands ?? this.commands,
+      slashCommands: slashCommands ?? this.slashCommands,
       queued: queued ?? this.queued,
       activity: clearActivity ? null : (activity ?? this.activity),
     );
@@ -398,14 +408,7 @@ class SessionController extends Notifier<SessionState> {
         );
       case 'available_commands_update':
         final cmds = event.raw['commands'];
-        if (cmds is List) {
-          state = state.copyWith(commands: [
-            for (final c in cmds)
-              if (c is Map && c['name'] is String) c['name'] as String,
-            for (final c in cmds)
-              if (c is String) c,
-          ]);
-        }
+        if (cmds is List) _applyCommands(cmds);
       default:
         break;
     }
@@ -487,17 +490,25 @@ class SessionController extends Notifier<SessionState> {
       if (gen != _generation || !ref.mounted) return;
       final data = r['data'];
       final cmds = data is Map ? data['commands'] : null;
-      if (cmds is List) {
-        state = state.copyWith(commands: [
-          for (final c in cmds)
-            if (c is Map && c['name'] is String) c['name'] as String,
-          for (final c in cmds)
-            if (c is String) c,
-        ]);
-      }
+      if (cmds is List) _applyCommands(cmds);
     } catch (_) {
       // the palette works without slash commands
     }
+  }
+
+  /// Parse a raw commands list into both the name list and the full
+  /// SlashCommand objects the slash menu filters on.
+  void _applyCommands(List<dynamic> cmds) {
+    final slash = SlashCommand.listFrom(cmds);
+    state = state.copyWith(
+      commands: [
+        for (final c in cmds)
+          if (c is Map && c['name'] is String) c['name'] as String,
+        for (final c in cmds)
+          if (c is String) c,
+      ],
+      slashCommands: slash,
+    );
   }
 
   /// The reducer owns transcript state; fresh info reporting
@@ -551,12 +562,95 @@ class SessionController extends Notifier<SessionState> {
   /// The active stream's cursor, for tests and diagnostics.
   int? get streamLastSeq => _stream?.lastSeq;
 
-  // TODO(D2): send(text, mode, images) - optimistic LocalSendInput dispatch,
-  // client.prompt, setInfo on success, reviewed.unflag on success only.
-  // TODO(D2): answerUi(requestId, answer) and dropUi(requestId).
-  // TODO(D2): abort() -> client.abort(gwId).
-  // TODO(D2): setModel/setThinking/rename/compact -> client call + refreshInfo.
-  // TODO(D2): forgetCache(gwId) once transcript caching exists.
+  // ------------------------------------------------------------- actions
+  // Ported from web/src/lib/state/active.svelte.ts (send / answerUi /
+  // dropUi / abort / setModel / setThinking / rename / compact).
+
+  int _localCounter = 0;
+
+  /// Send a prompt. Optimistic: the LocalSendInput paints the bubble before
+  /// the request goes out. Durable at the composer level: on failure the
+  /// bubble turns into a failed one (Retry affordance) and the composer puts
+  /// the text back. The review pin clears only after the gateway accepts.
+  Future<bool> send(String text,
+      {String mode = 'prompt', List<Map<String, String>>? images}) async {
+    final localId = 'local-${++_localCounter}';
+    if (ref.mounted) state = state.copyWith(clearWsError: true);
+    _dispatch(LocalSendInput(
+        localId: localId, text: text, mode: mode, images: images));
+    try {
+      final env = await ref.read(sessionEnvProvider.future);
+      final info = await env.client.prompt(gwId, text, mode: mode, images: images);
+      if (!ref.mounted) return true; // sent; nothing left to paint
+      _setInfo(info);
+      if (mode != 'prompt') {
+        unawaited(_refreshQueued(env, gwId, _generation));
+      }
+      // The user is working in here again: the review pin only makes sense on
+      // a settled session. Cleared after the ack, so a failed send keeps it.
+      await ref.read(reviewedStoreProvider.notifier).unflag(gwId);
+      return true;
+    } catch (e) {
+      if (!ref.mounted) return false;
+      _dispatch(LocalSendFailedInput(
+          localId: localId,
+          error:
+              e is GatewayClientError ? e.message : 'Send failed'));
+      return false;
+    }
+  }
+
+  /// Answer one dialog. Local state is not touched on success: the
+  /// ui_resolved event removes it through the reducer. A 409 (someone else
+  /// answered first, or it timed out) drops it locally.
+  Future<void> answerUi(String requestId, Map<String, Object?> answer) async {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.answerUi(gwId, requestId, answer);
+  }
+
+  /// Remove a dialog locally, e.g. after answering it or after someone else
+  /// beat us to it (409).
+  void dropUi(String requestId) {
+    _dispatch(PendingUiInput(
+        state.pendingUi.where((u) => u.id != requestId).toList()));
+  }
+
+  /// Stop the current turn.
+  Future<void> abort() async {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.abort(gwId);
+  }
+
+  Future<void> setModel(String provider, String modelId) async {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.setModel(gwId, provider, modelId);
+    if (!ref.mounted) return;
+    await refreshInfo();
+  }
+
+  Future<void> setThinking(String level) async {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.setThinking(gwId, level);
+    if (!ref.mounted) return;
+    await refreshInfo();
+  }
+
+  Future<void> rename(String name) async {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.setName(gwId, name);
+    if (!ref.mounted) return;
+    await refreshInfo();
+  }
+
+  /// Ask omp to compact the session context. `instructions` steers what to keep.
+  Future<void> compact(String? instructions) async {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.compact(gwId, instructions: instructions);
+    if (!ref.mounted) return;
+    await refreshInfo();
+  }
+
+  // TODO(D2 later): forgetCache(gwId) once transcript caching exists.
 
   // -------------------------------------------------------------- internals
 

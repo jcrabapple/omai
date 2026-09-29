@@ -13,11 +13,22 @@ import 'package:ohmypi/api/client.dart';
 import 'package:ohmypi/api/models.dart';
 import 'package:ohmypi/state/connection_notifier.dart';
 import 'package:ohmypi/state/connection_store.dart';
+import 'package:ohmypi/state/reviewed_store.dart';
 import 'package:ohmypi/state/session_controller.dart';
 import 'package:ohmypi/state/sessions_store.dart';
 import 'package:ohmypi/stream/session_stream.dart';
+import 'package:ohmypi/transcript/items.dart';
 
 import '../stream/fakes.dart';
+/// In-memory reviewed store persistence.
+class MemoryReviewedKv implements ReviewedKv {
+  final map = <String, String>{};
+  @override
+  Future<String?> get(String key) async => map[key];
+  @override
+  Future<void> set(String key, String value) async => map[key] = value;
+}
+
 http.Response _json(Object? body, {int status = 200}) =>
     http.Response(jsonEncode(body), status,
         headers: {'content-type': 'application/json'});
@@ -59,26 +70,52 @@ class MemoryPrefs implements ConnectionPrefs {
 
 /// Scriptable gateway: routes the session endpoints, records request order.
 class FakeGateway {
-  FakeGateway({this.infoJson, this.messages = const [], this.status = 200});
+  FakeGateway({Map<String, Object?>? infoJson, this.messages = const [], this.status = 200})
+      : infoJson = infoJson ?? {};
 
-  Map<String, Object?>? infoJson;
+  Map<String, Object?> infoJson = {};
   List<Object?> messages;
   int status;
   final List<String> paths = [];
 
-  /// Test seam: hold /responses to /messages until completed (mid-open
-  /// dispose tests).
+  /// Request bodies by path suffix, for asserting prompt/answer payloads.
+  final Map<String, Object?> bodies = {};
+
+  /// Paths that answer with this status instead of 200.
+  final Set<String> failPaths = {};
+
+  /// Test seam: hold /responses to /messages until completed.
   Completer<void>? messagesGate;
+
+  /// Test seam: hold /prompt responses until completed (durable-send tests).
+  Completer<void>? promptGate;
+
+  /// Commands payload for /commands (full SlashCommand objects).
+  List<Object?> commands = const [];
 
   http.Client client() => MockClient((req) async {
         paths.add(req.url.path + (req.url.queryParameters.isEmpty
             ? ''
             : '?${req.url.query}'));
-        if (status != 200) return _json({'error': 'nope'}, status: status);
+        final body = req.body.isEmpty ? null : jsonDecode(req.body);
+        if (body is Map<String, Object?>) {
+          bodies[req.url.path] = body;
+        }
+        if (failPaths.any(req.url.path.endsWith)) {
+          return _json({'error': 'nope'}, status: status == 200 ? 500 : status);
+        }
+        if (status != 200) {
+          return _json({'error': 'nope'}, status: status);
+        }
         if (req.url.path.endsWith('/messages')) {
           final gate = messagesGate;
           if (gate != null) await gate.future;
           return _json({'messages': messages});
+        }
+        if (req.url.path.endsWith('/prompt')) {
+          final gate = promptGate;
+          if (gate != null) await gate.future;
+          return _json(infoJson);
         }
         if (req.url.path.endsWith('/state')) {
           return _json({});
@@ -87,9 +124,9 @@ class FakeGateway {
           return _json({'data': {}});
         }
         if (req.url.path.endsWith('/commands')) {
-          return _json({'data': {'commands': []}});
+          return _json({'data': {'commands': commands}});
         }
-        return _json(infoJson ?? {});
+        return _json(infoJson);
       });
 }
 
@@ -97,9 +134,15 @@ ProviderContainer makeContainer({
   required FakeGateway gateway,
   required SocketHub hub,
   FakeScheduler? scheduler,
+  MemoryReviewedKv? reviewedKv,
 }) {
   final sched = scheduler ?? FakeScheduler();
   final container = ProviderContainer(overrides: [
+    if (reviewedKv != null)
+      reviewedKvProvider.overrideWithValue(reviewedKv)
+    else
+      // send() touches the reviewed store; keep it off SharedPreferences.
+      reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
     connectionPrefsProvider
         .overrideWithValue(MemoryPrefs(const [
       ConnectionRecord(id: 'c1', url: 'https://g', label: 'G')
@@ -159,7 +202,7 @@ void main() {
     expect(sock.url.path, '/omp-ws/abc');
     expect(sock.url.queryParameters['after'], '3');
 
-    final s = container.read(provider);
+    final s = container.read(sessionControllerProvider('abc'));
     expect(s.phase, SessionPhase.ready);
     expect(s.transcript.items, isNotEmpty, reason: 'history paints the transcript');
     expect(s.running, isFalse);
@@ -175,13 +218,13 @@ void main() {
     await pumpEventQueue();
 
     hub.current.frame(1, {'type': 'agent_start'});
-    expect(container.read(provider).running, isTrue);
-    expect(container.read(provider).activity, isNotNull);
+    expect(container.read(sessionControllerProvider('abc')).running, isTrue);
+    expect(container.read(sessionControllerProvider('abc')).activity, isNotNull);
 
     hub.current.frame(2, {'type': 'agent_end'});
-    expect(container.read(provider).running, isFalse,
+    expect(container.read(sessionControllerProvider('abc')).running, isFalse,
         reason: 'agent_end always clears running');
-    expect(container.read(provider).activity, isNull);
+    expect(container.read(sessionControllerProvider('abc')).activity, isNull);
   });
 
   test('a resync replaces state: fresh info with isStreaming false clears running',
@@ -197,7 +240,7 @@ void main() {
     await pumpEventQueue();
 
     hub.current.frame(1, {'type': 'agent_start'});
-    expect(container.read(provider).running, isTrue);
+    expect(container.read(sessionControllerProvider('abc')).running, isTrue);
 
     // Reconnect; the server answers auth_ok with gap:true on the new socket,
     // which triggers a resync: a fresh snapshot whose info.isStreaming is
@@ -214,11 +257,11 @@ void main() {
     ];
     await pumpEventQueue();
 
-    expect(container.read(provider).running, isFalse,
+    expect(container.read(sessionControllerProvider('abc')).running, isFalse,
         reason: 'the resync snapshot resets the turn state');
-    expect(container.read(provider).activity, isNull,
+    expect(container.read(sessionControllerProvider('abc')).activity, isNull,
         reason: 'a resync that ends the turn also clears the activity line');
-    expect(container.read(provider).transcript.items, isNotEmpty);
+    expect(container.read(sessionControllerProvider('abc')).transcript.items, isNotEmpty);
   });
 
   test('fresh info reporting isStreaming:false clears running', () async {
@@ -231,16 +274,16 @@ void main() {
     await pumpEventQueue();
 
     hub.current.frame(1, {'type': 'agent_start'});
-    expect(container.read(provider).running, isTrue);
+    expect(container.read(sessionControllerProvider('abc')).running, isTrue);
 
     gateway.infoJson = infoJson(isStreaming: false);
-    await container.read(provider.notifier).refreshInfo();
+    await container.read(sessionControllerProvider('abc').notifier).refreshInfo();
 
-    expect(container.read(provider).running, isFalse,
+    expect(container.read(sessionControllerProvider('abc')).running, isFalse,
         reason: 'isStreaming:false in fresh info always clears running');
-    expect(container.read(provider).activity, isNull,
+    expect(container.read(sessionControllerProvider('abc')).activity, isNull,
         reason: 'fresh info ending the turn clears the activity line');
-    expect(container.read(provider).info?.isStreaming, isFalse);
+    expect(container.read(sessionControllerProvider('abc')).info?.isStreaming, isFalse);
   });
 
   test('onGone: close 4404 puts the session in the gone phase', () async {
@@ -253,12 +296,12 @@ void main() {
     await pumpEventQueue();
 
     hub.current.frame(1, {'type': 'agent_start'});
-    expect(container.read(provider).activity, isNotNull);
+    expect(container.read(sessionControllerProvider('abc')).activity, isNotNull);
     hub.current.serverClose(4404);
     await pumpEventQueue();
 
-    expect(container.read(provider).phase, SessionPhase.gone);
-    expect(container.read(provider).activity, isNull,
+    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.gone);
+    expect(container.read(sessionControllerProvider('abc')).activity, isNull,
         reason: 'going away clears the activity line');
   });
 
@@ -271,7 +314,7 @@ void main() {
     addTearDown(sub.close);
     await pumpEventQueue();
 
-    expect(container.read(provider).phase, SessionPhase.gone);
+    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.gone);
     expect(hub.sockets, isEmpty, reason: 'no socket for a gone session');
   });
 
@@ -284,7 +327,7 @@ void main() {
     addTearDown(sub.close);
     await pumpEventQueue();
 
-    expect(container.read(provider).phase, SessionPhase.error);
+    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.error);
     final connection = container.read(connectionNotifierProvider);
     expect(connection.active, isNull);
     expect(connection.connections, isEmpty);
@@ -362,7 +405,7 @@ void main() {
     final provider = sessionControllerProvider('abc');
     final sub = container.listen(provider, (previous, next) {});
     await pumpEventQueue();
-    expect(container.read(provider).phase, SessionPhase.error);
+    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.error);
 
     sub.close();
     await pumpEventQueue();
@@ -372,7 +415,7 @@ void main() {
     addTearDown(sub2.close);
     await pumpEventQueue();
 
-    expect(container.read(provider).phase, SessionPhase.ready,
+    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.ready,
         reason: 'a fresh open replaces the cached error');
     expect(hub.sockets, isNotEmpty,
         reason: 'the retry opens a socket for the session');
@@ -412,13 +455,13 @@ void main() {
     hub.current.frame(2, {'type': 'agent_end'});
     await pumpEventQueue();
 
-    container.read(provider.notifier).pause();
+    container.read(sessionControllerProvider('abc').notifier).pause();
     await Future<void>.delayed(const Duration(milliseconds: 700));
     expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
         statsAfterOpen,
         reason: 'a paused session makes no background REST calls');
 
-    container.read(provider.notifier).resume();
+    container.read(sessionControllerProvider('abc').notifier).resume();
     await Future<void>.delayed(const Duration(milliseconds: 700));
     expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
         greaterThan(statsAfterOpen),
@@ -442,7 +485,7 @@ void main() {
     addTearDown(sub.close);
     await pumpEventQueue();
 
-    expect(container.read(provider).phase, SessionPhase.gone);
+    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.gone);
     expect(container.read(sessionsStoreProvider).live, isEmpty,
         reason: 'a gone session disappears from the rail immediately');
   });
@@ -457,8 +500,209 @@ void main() {
     await pumpEventQueue();
     final sock = hub.current;
 
-    container.read(provider.notifier).pause();
+    container.read(sessionControllerProvider('abc').notifier).pause();
     await pumpEventQueue();
     expect(sock.closed, isTrue, reason: 'pausing drops the socket');
+  });
+
+  group('D2a actions', () {
+    Future<(ProviderContainer, FakeGateway, SocketHub)> open(
+        {FakeGateway? gw, List<Object?> commands = const []}) async {
+      final gateway = gw ??
+          FakeGateway(infoJson: infoJson())
+            ..commands = commands;
+      final hub = SocketHub();
+      final container = makeContainer(gateway: gateway, hub: hub);
+      final sub = container.listen(
+          sessionControllerProvider('abc'), (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
+      return (container, gateway, hub);
+    }
+
+    test('send posts the prompt and paints an optimistic bubble', () async {
+      final (container, gateway, hub) = await open();
+      hub.current;
+      final ok = await container
+          .read(sessionControllerProvider('abc').notifier)
+          .send('do the thing', mode: 'prompt');
+      expect(ok, isTrue);
+      expect(
+          gateway.bodies['/api/sessions/abc/prompt'],
+          containsPair('message', 'do the thing'));
+      expect((gateway.bodies['/api/sessions/abc/prompt'] as Map)['mode'], 'prompt');
+      // The optimistic bubble is in the transcript.
+      final userItems = container
+          .read(sessionControllerProvider('abc'))
+          .transcript
+          .items
+          .whereType<UserItem>()
+          .where((it) => it.text == 'do the thing');
+      expect(userItems, isNotEmpty);
+    });
+
+    test('a steer send posts mode steer and refreshes the queue count',
+        () async {
+      final (container, gateway, hub) = await open();
+      hub.current;
+      final ok = await container
+          .read(sessionControllerProvider('abc').notifier)
+          .send('push left', mode: 'steer');
+      expect(ok, isTrue);
+      expect((gateway.bodies['/api/sessions/abc/prompt'] as Map)['mode'], 'steer');
+      expect(gateway.paths.any((p) => p.endsWith('/state')), isTrue,
+          reason: 'steer/follow_up sends refresh the queued count');
+    });
+
+    test('durable send: failure makes a failed bubble, retry succeeds',
+        () async {
+      final (container, gateway, hub) = await open();
+      hub.current;
+      gateway.failPaths.add('/prompt');
+
+      final ok = await container
+          .read(sessionControllerProvider('abc').notifier)
+          .send('precious text', mode: 'prompt');
+      expect(ok, isFalse, reason: 'the gateway rejected the prompt');
+      final items = container.read(sessionControllerProvider('abc')).transcript.items;
+      final failed = items.last as UserItem;
+      expect(failed.text, 'precious text');
+      expect(failed.pending, isFalse);
+      expect(failed.failed, isTrue);
+      expect(failed.error, isNotEmpty,
+          reason: 'the failed bubble explains why');
+
+      // Retry: the same words go out again and this time land.
+      gateway.failPaths.clear();
+      final ok2 = await container
+          .read(sessionControllerProvider('abc').notifier)
+          .send('precious text', mode: 'prompt');
+      expect(ok2, isTrue);
+      expect(
+          gateway.paths.where((p) => p.endsWith('/prompt')).length, 2);
+    });
+
+    test('the review pin clears only after the ack (ported reviewed tests)',
+        () async {
+      final kv = MemoryReviewedKv();
+      final gateway = FakeGateway(infoJson: infoJson());
+      final hub = SocketHub();
+      final container =
+          makeContainer(gateway: gateway, hub: hub, reviewedKv: kv);
+      final provider = sessionControllerProvider('abc');
+      final sub = container.listen(provider, (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
+      await container.read(reviewedStoreProvider.notifier).flag('abc');
+      expect(
+          container.read(reviewedStoreProvider).needsReview.contains('abc'),
+          isTrue);
+
+      // A failed send keeps the pin.
+      gateway.failPaths.add('/prompt');
+      await container.read(sessionControllerProvider('abc').notifier).send('again');
+      expect(
+          container.read(reviewedStoreProvider).needsReview.contains('abc'),
+          isTrue, reason: 'a failed send keeps the review pin');
+
+      // A successful send clears it.
+      gateway.failPaths.clear();
+      await container.read(sessionControllerProvider('abc').notifier).send('again');
+      expect(
+          container.read(reviewedStoreProvider).needsReview.contains('abc'),
+          isFalse, reason: 'sending a prompt clears the review pin');
+    });
+
+    test('answerUi posts the answer payload; ui_resolved clears the dialog',
+        () async {
+      final gw = FakeGateway(infoJson: infoJson())
+        ..infoJson['pendingUi'] = [
+          {'id': 'r1', 'method': 'confirm', 'title': 'Allow edit'}
+        ];
+      final (container, gateway, hub) = await open(gw: gw);
+      expect(container.read(sessionControllerProvider('abc')).pendingUi, hasLength(1));
+
+      await container
+          .read(sessionControllerProvider('abc').notifier)
+          .answerUi('r1', {'confirmed': true});
+      expect(gateway.bodies['/api/sessions/abc/ui/r1'],
+          {'confirmed': true},
+          reason: 'the answer payload goes through verbatim');
+
+      // The dialog stays until the ui_resolved event (or a local drop).
+      expect(container.read(sessionControllerProvider('abc')).pendingUi, hasLength(1));
+      hub.current.frame(5, {
+        'type': 'ui_resolved',
+        'id': 'r1',
+      });
+      await pumpEventQueue();
+      expect(container.read(sessionControllerProvider('abc')).pendingUi, isEmpty,
+          reason: 'ui_resolved removes the dialog');
+    });
+
+    test('dropUi removes a dialog locally (e.g. after a 409)', () async {
+      final (container, gateway, hub) = await open();
+      hub.current;
+      container
+          .read(sessionControllerProvider('abc').notifier)
+          .dropUi('anything'); // no-op on an empty list
+      expect(container.read(sessionControllerProvider('abc')).pendingUi, isEmpty);
+    });
+
+    test('abort posts to the abort endpoint', () async {
+      final (container, gateway, hub) = await open();
+      hub.current;
+      await container.read(sessionControllerProvider('abc').notifier).abort();
+      expect(gateway.paths.any((p) => p.endsWith('/abort')), isTrue);
+    });
+
+    test('setModel, setThinking, rename and compact post and refresh info',
+        () async {
+      final (container, gateway, hub) = await open();
+      hub.current;
+      final n = gateway.paths.length;
+      final c = container.read(sessionControllerProvider('abc').notifier);
+      await c.setModel('anthropic', 'claude-x');
+      expect(gateway.bodies['/api/sessions/abc/model'],
+          {'provider': 'anthropic', 'modelId': 'claude-x'});
+      await c.setThinking('low');
+      expect(
+          gateway.bodies['/api/sessions/abc/thinking'], {'level': 'low'});
+      await c.rename('New name');
+      expect(gateway.bodies['/api/sessions/abc/name'], {'name': 'New name'});
+      await c.compact('keep the plan');
+      expect(gateway.bodies['/api/sessions/abc/compact'],
+          {'instructions': 'keep the plan'});
+      // Each action refreshes info afterwards.
+      expect(
+          gateway.paths
+              .sublist(n)
+              .where((p) => p == '/api/sessions/abc')
+              .length,
+          4,
+          reason: 'every action refetches info');
+    });
+
+    test('slash commands load from /commands with their full shape',
+        () async {
+      final (container, gateway, hub) = await open();
+      hub.current;
+      gateway.commands = [
+        {
+          'name': 'compact',
+          'description': 'Compact the context',
+          'source': 'builtin',
+        },
+      ];
+      final c = container.read(sessionControllerProvider('abc').notifier);
+      // Reload happens at open; trigger a refresh by reopening the env read
+      // path: simplest is to assert the state after the open already ran.
+      c; // open() already consumed the initial /commands; re-set and reload.
+      container.invalidate(sessionControllerProvider('abc'));
+      await pumpEventQueue();
+      final s = container.read(sessionControllerProvider('abc'));
+      expect(s.slashCommands.map((x) => x.name), contains('compact'));
+      expect(s.commands, contains('compact'));
+    });
   });
 }

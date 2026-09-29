@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../../theme/tokens.dart';
 import '../../transcript/blocks.dart';
+import '../../transcript/items.dart' show UserItem;
 import '../../widgets/transcript_item.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -50,6 +51,16 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// Retry a failed local send: re-send the text. The failed bubble stays
+  /// until a fresh echo or the reducer's settle pass cleans it up.
+  void _retrySend(UserItem item) {
+    final text = item.text.trim();
+    if (text.isEmpty) return;
+    ref
+        .read(sessionControllerProvider(widget.state.gwId).notifier)
+        .send(text);
   }
 
   void _onScroll() {
@@ -115,6 +126,12 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
               : TranscriptItemView(
                   key: ValueKey('view:${b.key}'),
                   item: (b as ItemBlock).item,
+                  callbacks: TranscriptItemCallbacks(
+                    onRetrySend: b.item is UserItem &&
+                            (b.item as UserItem).failed == true
+                        ? _retrySend
+                        : null,
+                  ),
                 ),
         ),
     ];

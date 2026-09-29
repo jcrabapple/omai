@@ -12,11 +12,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:ohmypi/api/client.dart';
+import 'package:ohmypi/composer/drafts.dart';
 import 'package:ohmypi/features/session/session_screen.dart';
 import 'package:ohmypi/features/session/session_header.dart';
 import 'package:ohmypi/state/connection_notifier.dart';
 import 'package:ohmypi/state/connection_store.dart';
 import 'package:ohmypi/state/session_controller.dart';
+import 'package:ohmypi/state/reviewed_store.dart';
 import 'package:ohmypi/state/sessions_store.dart';
 import 'package:ohmypi/stream/scheduler.dart';
 import 'package:ohmypi/stream/session_stream.dart';
@@ -50,6 +52,24 @@ class MemoryPrefs implements ConnectionPrefs {
   Future<void> save(List<ConnectionRecord> connections) async {}
 }
 
+class MemoryReviewedKv implements ReviewedKv {
+  final map = <String, String>{};
+  @override
+  Future<String?> get(String key) async => map[key];
+  @override
+  Future<void> set(String key, String value) async => map[key] = value;
+}
+
+class MemoryDraftKv implements DraftKv {
+  final map = <String, String>{};
+  @override
+  Future<String?> get(String key) async => map[key];
+  @override
+  Future<void> set(String key, String value) async => map[key] = value;
+  @override
+  Future<void> remove(String key) async => map.remove(key);
+}
+
 class SocketHub {
   final List<FakeSocket> sockets = [];
   FakeSocket get current => sockets.last;
@@ -67,12 +87,24 @@ class FakeGateway {
   int status;
   List<Object?> messages;
 
+  /// Request bodies by path, for asserting prompts and answers.
+  final Map<String, Object?> bodies = {};
+
   http.Client client() => MockClient((req) async {
+        if (req.body.isNotEmpty) {
+          final decoded = jsonDecode(req.body);
+          if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
+        }
         if (status != 200) {
           return _json({'error': 'nope'}, status: status);
         }
         if (req.url.path.endsWith('/messages')) {
           return _json({'messages': messages});
+        }
+        if (req.url.path.endsWith('/state')) return _json({});
+        if (req.url.path.endsWith('/stats')) return _json({'data': {}});
+        if (req.url.path.endsWith('/commands')) {
+          return _json({'data': {'commands': []}});
         }
         return _json({});
       });
@@ -96,6 +128,8 @@ ProviderContainer _container({
     tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
     sessionsPollIntervalProvider
         .overrideWithValue(const Duration(hours: 1)),
+    reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
+    draftKvProvider.overrideWithValue(MemoryDraftKv()),
     gatewayClientFactoryProvider.overrideWith((ref) => (baseUrl, token) =>
         GatewayClient(baseUrl: baseUrl, token: token,
             client: gateway.client())),
@@ -275,7 +309,8 @@ void main() {
     expect(find.text('Try again'), findsOneWidget);
   });
 
-  testWidgets('a pending approval renders the read-only banner', (tester) async {
+  testWidgets('a blocking approval takes over the composer with Yes / No',
+      (tester) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -297,9 +332,21 @@ void main() {
     await tester.pump();
     await tester.pump();
 
+    // The approval panel replaced the composer.
     expect(find.text('Run command'), findsOneWidget);
     expect(find.text('rm -rf build'), findsOneWidget);
-    expect(find.text('Approve and Deny arrive in the next build.'),
-        findsOneWidget);
+    expect(find.text('Needs you'), findsOneWidget);
+    expect(find.text('Yes'), findsOneWidget);
+    expect(find.text('No'), findsOneWidget);
+    expect(find.text('Message omp'), findsNothing,
+        reason: 'the takeover replaces the composer entirely');
+
+    // Answering posts the answer and clears the panel.
+    gateway.bodies.clear();
+    await tester.tap(find.text('Yes'));
+    await tester.pump();
+    await tester.pump();
+    expect(
+        gateway.bodies['/api/sessions/abc/ui/u1'], {'confirmed': true});
   });
 }

@@ -391,6 +391,36 @@ void main() {
         call: (GatewayClient c) => c.startSession(cwd: '/home/user/x'),
       ),
       _Endpoint(
+        name: 'startSession full create body (API.md)',
+        method: 'POST',
+        path: '/api/sessions',
+        body: {
+          'cwd': '/home/user/x',
+          'model': 'anthropic/claude-sonnet',
+          'thinking': 'high',
+          'approvalMode': 'always-ask',
+        },
+        call: (GatewayClient c) => c.startSession(
+          cwd: '/home/user/x',
+          model: 'anthropic/claude-sonnet',
+          thinking: 'high',
+          approvalMode: 'always-ask',
+        ),
+      ),
+      _Endpoint(
+        name: 'startSession resume (API.md resumeFrom)',
+        method: 'POST',
+        path: '/api/sessions',
+        body: {
+          'resumeFrom': '/home/user/.omp/agent/sessions/f.jsonl',
+          'cwd': '/home/user/x',
+        },
+        call: (GatewayClient c) => c.startSession(
+          resumeFrom: '/home/user/.omp/agent/sessions/f.jsonl',
+          cwd: '/home/user/x',
+        ),
+      ),
+      _Endpoint(
         name: 'sessionInfo',
         method: 'GET',
         path: '/api/sessions/$sid',
@@ -408,6 +438,22 @@ void main() {
         path: '/api/sessions/$sid/prompt',
         body: {'message': 'hi', 'mode': 'prompt'},
         call: (GatewayClient c) => c.prompt(sid, 'hi'),
+      ),
+      _Endpoint(
+        name: 'prompt with images',
+        method: 'POST',
+        path: '/api/sessions/$sid/prompt',
+        body: {
+          'message': 'see this',
+          'mode': 'prompt',
+          'images': [
+            {'type': 'image', 'data': 'QUJD', 'mimeType': 'image/png'}
+          ],
+        },
+        call: (GatewayClient c) => c.prompt(sid, 'see this',
+            images: const [
+              {'type': 'image', 'data': 'QUJD', 'mimeType': 'image/png'}
+            ]),
       ),
       _Endpoint(
         name: 'abort',

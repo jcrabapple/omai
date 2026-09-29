@@ -13,8 +13,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../api/errors.dart';
 import '../../api/models.dart';
 import '../../app/app.dart';
+import '../../features/new_session/new_session_sheet.dart';
 import '../../format.dart';
 import '../../state/connection_notifier.dart';
 import '../../state/grouping.dart';
@@ -38,6 +40,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
 
   // Set in initState: dispose still needs the store after `ref` is unsafe.
   SessionsStore? _store;
+
+  /// Saved-session files with a resume POST in flight; the row shows a
+  /// spinner and ignores further taps until it settles.
+  final Set<String> _resuming = {};
 
   @override
   void initState() {
@@ -166,6 +172,13 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
                     ref.read(sessionsStoreProvider.notifier).refresh(),
                 child: _buildBody(context, sessions, groups, empty),
               ),
+        floatingActionButton: FloatingActionButton.extended(
+          tooltip: 'New session',
+          onPressed: () => showNewSessionSheet(context, ref,
+              onCreated: _onSessionStarted),
+          icon: const Icon(Icons.add),
+          label: const Text('New session'),
+        ),
       );
   }
 
@@ -216,7 +229,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
                 sub: '${basename(s.cwd ?? s.cwdFolder)} · '
                     '${relativeTime((s.mtime * 1000).round(), DateTime.now().millisecondsSinceEpoch)}',
                 status: null,
-                onTap: null,
+                busy: _resuming.contains(s.file),
+                onTap:
+                    _resuming.contains(s.file) ? null : () => _resume(s),
               ),
           ]);
     }
@@ -242,6 +257,60 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => SessionScreen(gwId: gwId),
     ));
+  }
+
+  /// A session the New session sheet created: surface it in the store and
+  /// open it.
+  void _onSessionStarted(SessionInfo info) {
+    final store = ref.read(sessionsStoreProvider.notifier);
+    store.patch(info);
+    store.refresh();
+    _openSession(info.gwId);
+  }
+
+  /// Resume a saved transcript: POST {resumeFrom}. alreadyLive means a live
+  /// session has the file open, so we open that one instead of forking a
+  /// duplicate; cwdFallback means the transcript's folder is gone and the
+  /// gateway started in its default, which the user is told about.
+  Future<void> _resume(SavedSession s) async {
+    if (_resuming.contains(s.file)) return;
+    setState(() => _resuming.add(s.file));
+    final store = ref.read(sessionsStoreProvider.notifier);
+    try {
+      final connection = ref.read(connectionNotifierProvider);
+      final active = connection.active;
+      if (active == null) throw const Offline('Not signed in.');
+      final token = await ref.read(tokenStoreProvider).read(active.id);
+      if (!mounted) return;
+      if (token == null || token.isEmpty) throw const Offline('Not signed in.');
+      final client =
+          ref.read(gatewayClientFactoryProvider)(active.url, token);
+      final info = await client.startSession(resumeFrom: s.file);
+      if (!mounted) return;
+      store.patch(info);
+      await store.refresh();
+      if (!mounted) return;
+      _openSession(info.gwId);
+      if (info.cwdFallback) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'The folder ${s.displayCwd} no longer exists. '
+              'The session started in ${info.cwd} instead.'),
+        ));
+      }
+    } on GatewayClientError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Could not resume the session')));
+      }
+    } finally {
+      _resuming.remove(s.file);
+      if (mounted) setState(() {});
+    }
   }
 }
 
@@ -293,6 +362,7 @@ class SessionRow extends StatelessWidget {
     required this.sub,
     this.status,
     this.badge = 0,
+    this.busy = false,
     this.onTap,
   });
 
@@ -300,6 +370,10 @@ class SessionRow extends StatelessWidget {
   final String sub;
   final SessionStatus? status;
   final int badge;
+
+  /// True while a resume POST runs for this row: the glyph column shows a
+  /// spinner and [onTap] is expected to be null.
+  final bool busy;
   final VoidCallback? onTap;
 
   @override
@@ -322,9 +396,15 @@ class SessionRow extends StatelessWidget {
                 SizedBox(
                   width: 14,
                   child: Center(
-                    child: status != null
-                        ? StatusGlyph(status: status!)
-                        : const SizedBox(width: 8, height: 8),
+                    child: busy
+                        ? SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: tokens.accent))
+                        : status != null
+                            ? StatusGlyph(status: status!)
+                            : const SizedBox(width: 8, height: 8),
                   ),
                 ),
                 const SizedBox(width: OmpMetrics.s3),
