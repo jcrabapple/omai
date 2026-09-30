@@ -20,6 +20,9 @@ Future<void> showPlanSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    // A scroll-controlled sheet may grow to full height; without this it
+    // slides under the status bar (edge-to-edge is on by default).
+    useSafeArea: true,
     builder: (sheetContext) => Material(
       color: Theme.of(sheetContext).extension<OmpTokens>()!.surface,
       child: PlanPanel(phases: phases, runningTools: runningTools),

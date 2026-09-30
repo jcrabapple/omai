@@ -274,6 +274,9 @@ Future<void> showModelPickerSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    // A scroll-controlled sheet may grow to full height; without this it
+    // slides under the status bar (edge-to-edge is on by default).
+    useSafeArea: true,
     builder: (sheetContext) => Padding(
       // The search field summons the keyboard; isScrollControlled disables
       // the automatic inset handling, so pad by viewInsets or the keyboard

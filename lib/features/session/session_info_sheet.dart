@@ -23,6 +23,9 @@ Future<void> showSessionInfoSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    // A scroll-controlled sheet may grow to full height; without this it
+    // slides under the status bar (edge-to-edge is on by default).
+    useSafeArea: true,
     builder: (sheetContext) => Consumer(
       builder: (context, ref, _) => Material(
         color: Theme.of(sheetContext).extension<OmpTokens>()!.surface,

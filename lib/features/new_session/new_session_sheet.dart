@@ -65,6 +65,9 @@ Future<void> showNewSessionSheet(
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    // A scroll-controlled sheet may grow to full height; without this it
+    // slides under the status bar (edge-to-edge is on by default).
+    useSafeArea: true,
     builder: (sheetContext) => Padding(
       padding:
           EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
