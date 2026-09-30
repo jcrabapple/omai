@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../theme/tokens.dart';
+import 'about_page.dart';
 import 'appearance_page.dart';
 import 'connection_page.dart';
 import 'diagnostics_page.dart';
@@ -17,7 +18,15 @@ import 'skills_page.dart';
 import 'usage_page.dart';
 
 /// The pages Settings offers, in display order.
-enum SettingsPage { appearance, connection, diagnostics, models, skills, usage }
+enum SettingsPage {
+  appearance,
+  connection,
+  diagnostics,
+  models,
+  skills,
+  usage,
+  about,
+}
 
 class _PageSpec {
   const _PageSpec(this.page, this.title, this.hint, this.icon);
@@ -28,18 +37,48 @@ class _PageSpec {
 }
 
 const _pages = <_PageSpec>[
-  _PageSpec(SettingsPage.appearance, 'Appearance',
-      'Theme, accent, density and text size', Icons.palette_outlined),
-  _PageSpec(SettingsPage.connection, 'Connection',
-      'Gateway, sign-in status and sign out', Icons.lan_outlined),
-  _PageSpec(SettingsPage.diagnostics, 'Diagnostics',
-      'Checks that the gateway path works end to end', Icons.healing_outlined),
-  _PageSpec(SettingsPage.models, 'Models',
-      'The model catalog from the gateway', Icons.memory_outlined),
-  _PageSpec(SettingsPage.skills, 'Skills',
-      'Skills installed on the gateway host', Icons.build_outlined),
-  _PageSpec(SettingsPage.usage, 'Usage',
-      'Provider usage report', Icons.query_stats_outlined),
+  _PageSpec(
+    SettingsPage.appearance,
+    'Appearance',
+    'Theme, accent, density and text size',
+    Icons.palette_outlined,
+  ),
+  _PageSpec(
+    SettingsPage.connection,
+    'Connection',
+    'Gateway, sign-in status and sign out',
+    Icons.lan_outlined,
+  ),
+  _PageSpec(
+    SettingsPage.diagnostics,
+    'Diagnostics',
+    'Checks that the gateway path works end to end',
+    Icons.healing_outlined,
+  ),
+  _PageSpec(
+    SettingsPage.models,
+    'Models',
+    'The model catalog from the gateway',
+    Icons.memory_outlined,
+  ),
+  _PageSpec(
+    SettingsPage.skills,
+    'Skills',
+    'Skills installed on the gateway host',
+    Icons.build_outlined,
+  ),
+  _PageSpec(
+    SettingsPage.usage,
+    'Usage',
+    'Provider usage report',
+    Icons.query_stats_outlined,
+  ),
+  _PageSpec(
+    SettingsPage.about,
+    'About',
+    'Version, build and licenses',
+    Icons.info_outline,
+  ),
 ];
 
 class SettingsScreen extends StatelessWidget {
@@ -49,9 +88,8 @@ class SettingsScreen extends StatelessWidget {
   final SettingsPage? initial;
 
   void _open(BuildContext context, SettingsPage page) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => _pageWidget(page)),
-    );
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => _pageWidget(page)));
   }
 
   static Widget _pageWidget(SettingsPage page) => switch (page) {
@@ -61,6 +99,7 @@ class SettingsScreen extends StatelessWidget {
     SettingsPage.models => const ModelsPage(),
     SettingsPage.skills => const SkillsPage(),
     SettingsPage.usage => const UsagePage(),
+    SettingsPage.about => const AboutPage(),
   };
 
   @override
@@ -86,11 +125,17 @@ class SettingsScreen extends StatelessWidget {
                   leading: Icon(spec.icon, color: tokens.ink2),
                   title: Text(
                     spec.title,
-                    style: TextStyle(color: tokens.ink, fontSize: OmpMetrics.fsLg),
+                    style: TextStyle(
+                      color: tokens.ink,
+                      fontSize: OmpMetrics.fsLg,
+                    ),
                   ),
                   subtitle: Text(
                     spec.hint,
-                    style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsSm),
+                    style: TextStyle(
+                      color: tokens.ink3,
+                      fontSize: OmpMetrics.fsSm,
+                    ),
                   ),
                   trailing: Icon(Icons.chevron_right, color: tokens.ink3),
                   minLeadingWidth: 0,

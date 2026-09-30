@@ -28,6 +28,7 @@ const List<({String id, String name})> paletteSettingsPages = [
   (id: 'models', name: 'Models'),
   (id: 'skills', name: 'Skills'),
   (id: 'usage', name: 'Usage'),
+  (id: 'about', name: 'About'),
 ];
 
 /// Icon name from the web palette; the sheet maps it to a Material icon.
@@ -97,55 +98,71 @@ String? _liveStatus(SessionInfo s) {
 
 List<PaletteItem> buildPaletteItems(PaletteContext ctx) {
   final a = ctx.actions;
-  final live = [for (final s in ctx.live) if (!s.exited) s];
-  final needing = [for (final s in live) if (s.pendingUi.isNotEmpty) s];
+  final live = [
+    for (final s in ctx.live)
+      if (!s.exited) s,
+  ];
+  final needing = [
+    for (final s in live)
+      if (s.pendingUi.isNotEmpty) s,
+  ];
   final items = <PaletteItem>[];
 
-  items.add(PaletteItem(
-    id: 'a:new',
-    kind: PaletteKind.action,
-    title: 'New session',
-    icon: 'plus',
-    keywords: const ['start', 'create', 'open'],
-    run: a.newSession,
-  ));
-  if (needing.isNotEmpty) {
-    items.add(PaletteItem(
-      id: 'a:next',
+  items.add(
+    PaletteItem(
+      id: 'a:new',
       kind: PaletteKind.action,
-      title: 'Next session that needs you',
-      icon: 'alert',
-      sub: '${needing.length} waiting',
-      keywords: const ['attention', 'approval', 'waiting', 'blocked'],
-      run: a.nextAttention,
-    ));
+      title: 'New session',
+      icon: 'plus',
+      keywords: const ['start', 'create', 'open'],
+      run: a.newSession,
+    ),
+  );
+  if (needing.isNotEmpty) {
+    items.add(
+      PaletteItem(
+        id: 'a:next',
+        kind: PaletteKind.action,
+        title: 'Next session that needs you',
+        icon: 'alert',
+        sub: '${needing.length} waiting',
+        keywords: const ['attention', 'approval', 'waiting', 'blocked'],
+        run: a.nextAttention,
+      ),
+    );
   }
 
   for (final s in live) {
     final model = s.model?.displayName;
-    items.add(PaletteItem(
-      id: 's:${s.gwId}',
-      kind: PaletteKind.session,
-      title: s.title,
-      sub: [basename(s.cwd), if (model != null && model.isNotEmpty) model]
-          .join(' · '),
-      keywords: [if (s.cwd.isNotEmpty) s.cwd],
-      icon: 'terminal',
-      status: _liveStatus(s),
-      current: s.gwId == ctx.activeGwId,
-      run: () => a.openSession(s.gwId),
-    ));
+    items.add(
+      PaletteItem(
+        id: 's:${s.gwId}',
+        kind: PaletteKind.session,
+        title: s.title,
+        sub: [
+          basename(s.cwd),
+          if (model != null && model.isNotEmpty) model,
+        ].join(' · '),
+        keywords: [if (s.cwd.isNotEmpty) s.cwd],
+        icon: 'terminal',
+        status: _liveStatus(s),
+        current: s.gwId == ctx.activeGwId,
+        run: () => a.openSession(s.gwId),
+      ),
+    );
   }
 
   for (final p in paletteSettingsPages) {
-    items.add(PaletteItem(
-      id: 'p:${p.id}',
-      kind: PaletteKind.setting,
-      title: '${p.name} settings',
-      sub: 'Settings',
-      icon: 'sliders',
-      run: () => a.openSettings(p.id),
-    ));
+    items.add(
+      PaletteItem(
+        id: 'p:${p.id}',
+        kind: PaletteKind.setting,
+        title: '${p.name} settings',
+        sub: 'Settings',
+        icon: 'sliders',
+        run: () => a.openSettings(p.id),
+      ),
+    );
   }
 
   final liveFiles = {
@@ -155,15 +172,17 @@ List<PaletteItem> buildPaletteItems(PaletteContext ctx) {
   for (final s in ctx.saved) {
     if (liveFiles.contains(s.file)) continue;
     if (s.running) continue;
-    final folder = basename(s.displayCwd);
-    items.add(PaletteItem(
-      id: 'h:${s.file}',
-      kind: PaletteKind.history,
-      title: s.title.isEmpty ? folder : s.title,
-      sub: '$folder · ${relativeTime((s.mtime * 1000).round(), ctx.now)}',
-      icon: 'clock',
-      run: () => a.resume(s),
-    ));
+    final folder = savedFolderLabel(s, [for (final l in live) l.cwd]);
+    items.add(
+      PaletteItem(
+        id: 'h:${s.file}',
+        kind: PaletteKind.history,
+        title: savedTitle(s, [for (final l in live) l.cwd]),
+        sub: '$folder · ${relativeTime((s.mtime * 1000).round(), ctx.now)}',
+        icon: 'clock',
+        run: () => a.resume(s),
+      ),
+    );
   }
   return items;
 }
@@ -200,7 +219,10 @@ List<PaletteItem> rankItems(
   }
   final pool = kinds == null
       ? items
-      : [for (final i in items) if (kinds.contains(i.kind)) i];
+      : [
+          for (final i in items)
+            if (kinds.contains(i.kind)) i,
+        ];
 
   if (query.isEmpty) {
     final shown = <PaletteKind, int>{};
@@ -212,8 +234,8 @@ List<PaletteItem> rankItems(
       if (kind == PaletteKind.session) {
         // Sessions that need you first, and the one already on screen last.
         group.sort((x, y) {
-          final byNeeds = (y.status == 'needs' ? 1 : 0) -
-              (x.status == 'needs' ? 1 : 0);
+          final byNeeds =
+              (y.status == 'needs' ? 1 : 0) - (x.status == 'needs' ? 1 : 0);
           if (byNeeds != 0) return byNeeds;
           return (x.current ? 1 : 0) - (y.current ? 1 : 0);
         });
@@ -231,11 +253,10 @@ List<PaletteItem> rankItems(
   final scored = <_Scored>[];
   for (var at = 0; at < pool.length; at++) {
     final item = pool[at];
-    final score = fuzzyScoreAll(
-      query,
-      item.title,
-      [item.sub, ...item.keywords],
-    );
+    final score = fuzzyScoreAll(query, item.title, [
+      item.sub,
+      ...item.keywords,
+    ]);
     if (score >= 0) scored.add(_Scored(item, score.toDouble(), at));
   }
   scored.sort((x, y) {

@@ -147,6 +147,21 @@ class MainActivity : FlutterActivity() {
                     pendingLaunchPayload = null
                     result.success(null)
                 }
+                "getAppVersion" -> {
+                    // PackageManager info for the About page; longVersionCode
+                    // on API 28+, the legacy versionCode widened before that.
+                    val info = packageManager.getPackageInfo(packageName, 0)
+                    val code =
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            info.longVersionCode
+                        } else {
+                            @Suppress("DEPRECATION")
+                            info.versionCode.toLong()
+                        }
+                    result.success(
+                        mapOf("versionName" to (info.versionName ?: ""), "versionCode" to code)
+                    )
+                }
                 else -> result.notImplemented()
             }
         }

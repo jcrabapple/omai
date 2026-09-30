@@ -207,6 +207,40 @@ void main() {
     expect(find.text('Old chat'), findsOneWidget);
   });
 
+  testWidgets('a saved session with a blank title shows the folder, not an '
+      'empty row', (tester) async {
+    final gateway = ScriptableGateway(
+      payload: {
+        'live': [],
+        'saved': [
+          {
+            'file': '/t/blank.jsonl',
+            'mtime': DateTime.now().millisecondsSinceEpoch / 1000,
+            'sizeBytes': 10,
+            'cwdFolder': 'alpha',
+            'cwd': '/work/alpha',
+            'title': '',
+          },
+          // No prompt snippet on the gateway means title null (ecc5752).
+          {
+            'file': '/t/null.jsonl',
+            'mtime': DateTime.now().millisecondsSinceEpoch / 1000,
+            'sizeBytes': 10,
+            'cwdFolder': 'beta',
+            'cwd': '/work/beta',
+            'title': null,
+          },
+        ],
+      },
+    );
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    expect(find.text('alpha'), findsOneWidget);
+    expect(find.text('beta'), findsOneWidget);
+  });
+
   testWidgets(
     'an error with an existing list shows a banner, not a blank page',
     (tester) async {

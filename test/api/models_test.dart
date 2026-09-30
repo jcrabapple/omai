@@ -82,6 +82,18 @@ void main() {
       final empty = SessionInfo.fromJson({...fixture, 'ompSessionName': ''});
       expect(empty.title, 'ohmypi-gateway');
     });
+
+    // Ported from web/src/lib/__tests__/format.test.ts sessionTitle
+    // regression (gateway commit ecc5752): a null name falls through to the
+    // folder, and a whitespace-only name is treated as unset.
+    test('null or whitespace ompSessionName falls back to the folder', () {
+      final blank = SessionInfo.fromJson({...fixture, 'ompSessionName': null});
+      expect(blank.title, 'ohmypi-gateway');
+      final ws = SessionInfo.fromJson({...fixture, 'ompSessionName': '   '});
+      expect(ws.title, 'ohmypi-gateway');
+      final noCwd = SessionInfo.fromJson({...fixture, 'cwd': ''});
+      expect(noCwd.title, 'Session');
+    });
   });
 
   group('SavedSession', () {
@@ -111,6 +123,56 @@ void main() {
         'running': false,
       });
       expect(s.displayCwd, 'misc');
+    });
+
+    // Ported from web/src/lib/__tests__/format.test.ts savedFolderLabel and
+    // savedTitle, including the ecc5752 null-title regression: a session with
+    // no prompt snippet has a blank title and must fall back to the folder,
+    // never render as an empty row.
+    test('savedFolderLabel and savedTitle match the web rules', () {
+      SavedSession s(String title, String cwdFolder, String? cwd) =>
+          SavedSession.fromJson({
+            'file': '/t/a.jsonl',
+            'mtime': 0.0,
+            'sizeBytes': 1,
+            'cwdFolder': cwdFolder,
+            'cwd': ?cwd,
+            'title': title,
+            'running': false,
+          });
+      expect(
+        savedFolderLabel(s('', '-work-app', null), ['/home/me/work/app']),
+        'app',
+      );
+      expect(savedFolderLabel(s('', '-work-app', null), []), 'work-app');
+      expect(
+        savedFolderLabel(
+          s('', '-var-home-me-work-app', '/var/home/me/work/app'),
+          [],
+        ),
+        'app',
+      );
+      expect(savedTitle(s('', '-x', '/a/b'), []), 'b');
+      // The gateway normalizes a missing title to '', but a null in the
+      // payload must parse blank too, not crash.
+      final nullTitle = SavedSession.fromJson(const {
+        'file': '/t/b.jsonl',
+        'mtime': 0.0,
+        'sizeBytes': 1,
+        'cwdFolder': '-x',
+        'cwd': '/a/b',
+        'title': null,
+        'running': false,
+      });
+      expect(nullTitle.title, '');
+      expect(savedTitle(nullTitle, []), 'b');
+      expect(
+        savedFolderLabel(
+          s('   ', '-var-home-me-work-app', '/var/home/me/work/app'),
+          [],
+        ),
+        'app',
+      );
     });
   });
 

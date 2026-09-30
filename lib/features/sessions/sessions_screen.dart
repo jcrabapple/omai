@@ -290,7 +290,7 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
         for (final s in h.items)
           SessionRow(
             key: ValueKey('saved:${s.file}'),
-            title: s.title,
+            title: savedTitle(s, [for (final l in sessions.live) l.cwd]),
             sub:
                 '${basename(s.cwd ?? s.cwdFolder)} · '
                 '${relativeTime((s.mtime * 1000).round(), DateTime.now().millisecondsSinceEpoch)}',

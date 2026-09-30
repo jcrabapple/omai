@@ -1,6 +1,7 @@
 // Ported from web/src/lib/palette/__tests__/palette.test.ts, minus the
 // desktop-only items (theme toggle, slash commands, session-scoped actions).
-// 6 settings pages, not the web's 7: the app has no Agent config page.
+// 7 settings pages, not the web's 7: the app swaps the Agent config page for
+// an About page.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omai/api/models.dart';
@@ -46,14 +47,14 @@ SessionInfo session(
 }
 
 SavedSession saved(String file, String title) => SavedSession.fromJson({
-      'file': file,
-      'mtime': 1700000100.0,
-      'sizeBytes': 10,
-      'cwdFolder': 'x',
-      'cwd': '/work/x',
-      'title': title,
-      'running': false,
-    });
+  'file': file,
+  'mtime': 1700000100.0,
+  'sizeBytes': 10,
+  'cwdFolder': 'x',
+  'cwd': '/work/x',
+  'title': title,
+  'running': false,
+});
 
 PaletteContext _ctx({
   List<SessionInfo>? live,
@@ -72,13 +73,14 @@ PaletteContext _ctx({
 
 void main() {
   List<String> ids(List<PaletteItem> list) => list.map((i) => i.id).toList();
-  List<String> titles(List<PaletteItem> list) => list.map((i) => i.title).toList();
+  List<String> titles(List<PaletteItem> list) =>
+      list.map((i) => i.title).toList();
 
   group('buildPaletteItems', () {
     test('always offers new session and one item per settings page', () {
       final items = buildPaletteItems(_ctx());
       expect(ids(items), contains('a:new'));
-      expect(items.where((i) => i.kind == PaletteKind.setting), hasLength(6));
+      expect(items.where((i) => i.kind == PaletteKind.setting), hasLength(7));
       expect(
         titles(items.where((i) => i.kind == PaletteKind.setting).toList()),
         contains('Appearance settings'),
@@ -86,27 +88,26 @@ void main() {
     });
 
     test('offers next-attention only when a session is waiting', () {
-      expect(ids(buildPaletteItems(_ctx(live: [session('a')]))),
-          isNot(contains('a:next')));
-      final waiting = session('b', pendingUi: [
-        {'id': 'u', 'method': 'confirm'},
-      ]);
-      final items = buildPaletteItems(_ctx(live: [session('a'), waiting]));
       expect(
-        items.firstWhere((i) => i.id == 'a:next').sub,
-        '1 waiting',
+        ids(buildPaletteItems(_ctx(live: [session('a')]))),
+        isNot(contains('a:next')),
       );
+      final waiting = session(
+        'b',
+        pendingUi: [
+          {'id': 'u', 'method': 'confirm'},
+        ],
+      );
+      final items = buildPaletteItems(_ctx(live: [session('a'), waiting]));
+      expect(items.firstWhere((i) => i.id == 'a:next').sub, '1 waiting');
     });
 
     test('running the actions calls the injected callbacks', () {
       final a = _Actions();
       final s = saved('/s/b.jsonl', 'Old one');
-      final items = buildPaletteItems(_ctx(
-        actions: a,
-        live: [session('a')],
-        saved: [s],
-        activeGwId: 'a',
-      ));
+      final items = buildPaletteItems(
+        _ctx(actions: a, live: [session('a')], saved: [s], activeGwId: 'a'),
+      );
       for (final id in ['a:new', 'a:next', 's:a', 'h:/s/b.jsonl', 'p:agent']) {
         final found = items.where((i) => i.id == id);
         if (found.isNotEmpty) found.first.run();
@@ -114,9 +115,7 @@ void main() {
       items.firstWhere((i) => i.id == 'a:new').run();
       items.firstWhere((i) => i.id == 's:a').run();
       items.firstWhere((i) => i.id == 'h:/s/b.jsonl').run();
-      items
-          .firstWhere((i) => i.kind == PaletteKind.setting)
-          .run();
+      items.firstWhere((i) => i.kind == PaletteKind.setting).run();
       expect(a.newSessionCalled, isTrue);
       expect(a.openedSession, 'a');
       expect(a.resumed, s);
@@ -124,16 +123,21 @@ void main() {
     });
 
     test('marks live sessions with a status and the open one as current', () {
-      final items = buildPaletteItems(_ctx(
-        live: [
-          session('a', isStreaming: true),
-          session('b', pendingUi: [
-            {'id': 'u', 'method': 'confirm'},
-          ]),
-          session('c'),
-        ],
-        activeGwId: 'c',
-      ));
+      final items = buildPaletteItems(
+        _ctx(
+          live: [
+            session('a', isStreaming: true),
+            session(
+              'b',
+              pendingUi: [
+                {'id': 'u', 'method': 'confirm'},
+              ],
+            ),
+            session('c'),
+          ],
+          activeGwId: 'c',
+        ),
+      );
       PaletteItem by(String id) => items.firstWhere((i) => i.id == 's:$id');
       expect(by('a').status, 'running');
       expect(by('b').status, 'needs');
@@ -143,37 +147,42 @@ void main() {
     });
 
     test('skips history that is already a live session or running', () {
-      final items = buildPaletteItems(_ctx(
-        live: [session('a', ompSessionFile: '/s/a.jsonl')],
-        saved: [
-          SavedSession.fromJson({
-            'file': '/s/a.jsonl',
-            'mtime': 1700000100.0,
-            'sizeBytes': 10,
-            'cwdFolder': 'x',
-            'title': 'Live one',
-            'running': false,
-          }),
-          SavedSession.fromJson({
-            'file': '/s/c.jsonl',
-            'mtime': 1700000100.0,
-            'sizeBytes': 10,
-            'cwdFolder': 'x',
-            'title': 'Running one',
-            'running': true,
-          }),
-          saved('/s/b.jsonl', 'Old one'),
-        ],
-      ));
-      expect(
-        ids(items.where((i) => i.kind == PaletteKind.history).toList()),
-        ['h:/s/b.jsonl'],
+      final items = buildPaletteItems(
+        _ctx(
+          live: [session('a', ompSessionFile: '/s/a.jsonl')],
+          saved: [
+            SavedSession.fromJson({
+              'file': '/s/a.jsonl',
+              'mtime': 1700000100.0,
+              'sizeBytes': 10,
+              'cwdFolder': 'x',
+              'title': 'Live one',
+              'running': false,
+            }),
+            SavedSession.fromJson({
+              'file': '/s/c.jsonl',
+              'mtime': 1700000100.0,
+              'sizeBytes': 10,
+              'cwdFolder': 'x',
+              'title': 'Running one',
+              'running': true,
+            }),
+            saved('/s/b.jsonl', 'Old one'),
+          ],
+        ),
       );
+      expect(ids(items.where((i) => i.kind == PaletteKind.history).toList()), [
+        'h:/s/b.jsonl',
+      ]);
     });
 
     test('live sessions use the session name and cwd folder as sub', () {
       final items = buildPaletteItems(
-        _ctx(live: [session('a', ompSessionName: 'Fix login bug', cwd: '/work/ohmypi')]),
+        _ctx(
+          live: [
+            session('a', ompSessionName: 'Fix login bug', cwd: '/work/ohmypi'),
+          ],
+        ),
       );
       final s = items.firstWhere((i) => i.id == 's:a');
       expect(s.title, 'Fix login bug');
@@ -205,12 +214,8 @@ void main() {
       final kinds = out.map((i) => i.kind).toList();
       expect(kinds.indexOf(PaletteKind.action), 0);
       expect(kinds, isNot(contains(PaletteKind.setting)));
-      expect(
-        out.where((i) => i.kind == PaletteKind.history).length,
-        5,
-      );
-      final sessions =
-          out.where((i) => i.kind == PaletteKind.session).toList();
+      expect(out.where((i) => i.kind == PaletteKind.history).length, 5);
+      final sessions = out.where((i) => i.kind == PaletteKind.session).toList();
       expect(titles(sessions), [
         'Refactor parser',
         'Fix login bug',
@@ -269,29 +274,32 @@ void main() {
 
     test('the > prefix narrows to actions and settings', () {
       final out = rankItems(items, '>');
-      expect(
-        out.map((i) => i.kind).toSet(),
-        {PaletteKind.action, PaletteKind.setting},
-      );
+      expect(out.map((i) => i.kind).toSet(), {
+        PaletteKind.action,
+        PaletteKind.setting,
+      });
       final themed = rankItems(items, '> appearance');
       expect(themed, isNotEmpty);
       expect(
         themed.every(
-          (i) =>
-              i.kind == PaletteKind.action || i.kind == PaletteKind.setting,
+          (i) => i.kind == PaletteKind.action || i.kind == PaletteKind.setting,
         ),
         isTrue,
       );
-      expect(
-        themed.where((i) => i.kind == PaletteKind.session),
-        isEmpty,
-      );
+      expect(themed.where((i) => i.kind == PaletteKind.session), isEmpty);
     });
 
     test('finds settings pages by name', () {
+      final a = _Actions();
+      final items = buildPaletteItems(_ctx(actions: a));
       final appearance = rankItems(items, 'appearance');
       expect(appearance.first.kind, PaletteKind.setting);
       expect(appearance.first.title, 'Appearance settings');
+      final about = rankItems(items, 'about');
+      expect(about.first.kind, PaletteKind.setting);
+      expect(about.first.title, 'About settings');
+      about.first.run();
+      expect(a.settingsPage, 'about');
     });
 
     test('returns nothing when nothing matches, and honours the limit', () {

@@ -8,9 +8,7 @@ import 'keepalive.dart';
 class MethodChannelKeepaliveSurface implements KeepaliveSurface {
   const MethodChannelKeepaliveSurface();
 
-  static const MethodChannel channel = MethodChannel(
-    'us.snakepit.omai/native',
-  );
+  static const MethodChannel channel = MethodChannel('us.snakepit.omai/native');
 
   @override
   Future<bool> ensureNotificationPermission() async {
@@ -88,5 +86,27 @@ class MethodChannelKeepaliveSurface implements KeepaliveSurface {
     return channel.invokeMethod('cancelApproval', <String, Object?>{
       'requestId': requestId,
     });
+  }
+}
+
+/// The app version from Android's PackageManager, read at runtime via the
+/// native channel (no package_info_plus). Null when the channel fails or
+/// returns junk; the About page shows 'Unknown'.
+Future<({String versionName, int versionCode})?> fetchAppVersion() async {
+  try {
+    final r = await MethodChannelKeepaliveSurface.channel.invokeMethod<Object?>(
+      'getAppVersion',
+    );
+    if (r is! Map) return null;
+    final name = r['versionName'];
+    final code = r['versionCode'];
+    if (name is String && name.isNotEmpty && code is int) {
+      return (versionName: name, versionCode: code);
+    }
+    return null;
+  } on PlatformException {
+    return null;
+  } on MissingPluginException {
+    return null;
   }
 }

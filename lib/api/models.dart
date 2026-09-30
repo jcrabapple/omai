@@ -3,6 +3,8 @@
 // No Flutter imports; `dynamic` only at the JSON boundary, narrowed by the
 // small accessors below.
 
+import '../format.dart';
+
 /// Narrow typed accessors over a decoded JSON map.
 Map<String, dynamic>? asMap(Object? v) => v is Map<String, dynamic> ? v : null;
 List<Object?>? asList(Object? v) => v is List<Object?> ? v : null;
@@ -190,12 +192,14 @@ class SessionInfo {
   final bool alreadyLive;
   final bool cwdFallback;
 
-  /// Title shown in lists: the session name, else the cwd basename. The
-  /// gateway can report ompSessionName as '' when no name was set.
+  /// Title shown in lists, ported from web/src/lib/format.ts sessionTitle:
+  /// the trimmed session name, else the cwd basename, else 'Session'. The
+  /// gateway can report ompSessionName as '' or whitespace when no name was
+  /// set.
   String get title {
-    final name = ompSessionName;
-    if (name != null && name.isNotEmpty) return name;
-    return cwd.split('/').where((s) => s.isNotEmpty).lastOrNull ?? cwd;
+    final name = ompSessionName?.trim() ?? '';
+    if (name.isNotEmpty) return name;
+    return basename(cwd).isEmpty ? 'Session' : basename(cwd);
   }
 }
 
@@ -240,6 +244,33 @@ class SavedSession {
   final bool running;
 
   String get displayCwd => cwd ?? cwdFolder;
+}
+
+/// Port of web/src/lib/format.ts savedFolderLabel: the real cwd's basename
+/// when the transcript has one, else the live session whose mangled cwd ends
+/// with the folder, else the folder with its leading dashes stripped.
+String savedFolderLabel(SavedSession saved, List<String> liveCwds) {
+  final cwd = saved.cwd;
+  if (cwd != null && cwd.isNotEmpty) {
+    final base = basename(cwd);
+    return base.isEmpty ? cwd : base;
+  }
+  final folder = saved.cwdFolder;
+  for (final liveCwd in liveCwds) {
+    if (folder.isNotEmpty && liveCwd.replaceAll('/', '-').endsWith(folder)) {
+      return basename(liveCwd);
+    }
+  }
+  final unmangled = folder.replaceFirst(RegExp(r'^-+'), '');
+  return unmangled.isEmpty ? 'session' : unmangled;
+}
+
+// Port of web/src/lib/format.ts savedTitle (null-safe after gateway commit
+// ecc5752): a null/empty/whitespace title falls back to the folder label, so
+// a session with no prompt snippet never renders as an empty row.
+String savedTitle(SavedSession saved, List<String> liveCwds) {
+  final title = saved.title.trim();
+  return title.isNotEmpty ? title : savedFolderLabel(saved, liveCwds);
 }
 
 /// `GET /api/sessions` -> `{live: [...], saved: [...]}`.
