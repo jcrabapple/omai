@@ -5,6 +5,8 @@
 
 import 'dart:convert';
 
+import 'dart:ui' show CheckedState;
+
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
