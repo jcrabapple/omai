@@ -10,8 +10,20 @@ void main() {
 
     setUp(() {
       fixture = jsonDecode(
-              File('test/fixtures/api/session-info.json').readAsStringSync())
-          as Map<String, dynamic>;
+        File('test/fixtures/api/session-info.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
+    });
+
+    test('advisor parses, and a gateway without the field means off', () {
+      expect(
+        SessionInfo.fromJson({'gwId': 'a', 'advisor': true}).advisor,
+        isTrue,
+      );
+      expect(
+        SessionInfo.fromJson({'gwId': 'a', 'advisor': false}).advisor,
+        isFalse,
+      );
+      expect(SessionInfo.fromJson({'gwId': 'a'}).advisor, isFalse);
     });
 
     test('parses the captured fixture', () {
@@ -59,7 +71,10 @@ void main() {
 
     test('title falls back to cwd basename, prefers the session name', () {
       expect(SessionInfo.fromJson(fixture).title, 'ohmypi-gateway');
-      final named = SessionInfo.fromJson({...fixture, 'ompSessionName': 'fix bug'});
+      final named = SessionInfo.fromJson({
+        ...fixture,
+        'ompSessionName': 'fix bug',
+      });
       expect(named.title, 'fix bug');
     });
 
@@ -101,8 +116,11 @@ void main() {
 
   group('SessionsList', () {
     test('parses the trimmed fixture', () {
-      final list = SessionsList.fromJson(jsonDecode(
-          File('test/fixtures/api/sessions-list.json').readAsStringSync()));
+      final list = SessionsList.fromJson(
+        jsonDecode(
+          File('test/fixtures/api/sessions-list.json').readAsStringSync(),
+        ),
+      );
       expect(list.live, hasLength(1));
       expect(list.saved, hasLength(2));
       expect(list.live.first.isStreaming, isTrue);
@@ -132,7 +150,12 @@ void main() {
         'reasoning': true,
         'thinking': null,
         'input': ['text', 'image'],
-        'cost': {'input': 0.37, 'output': 1.25, 'cacheRead': 0.09, 'cacheWrite': 0},
+        'cost': {
+          'input': 0.37,
+          'output': 1.25,
+          'cacheRead': 0.09,
+          'cacheWrite': 0,
+        },
       });
       expect(m.label, 'openrouter/z-ai/glm-5.3-flashx');
       expect(m.reasoning, isTrue);
@@ -144,9 +167,18 @@ void main() {
     test('CatalogModels skips malformed entries', () {
       final c = CatalogModels.fromJson(const {
         'models': [
-          {'provider': 'p', 'id': 'm', 'selector': 'm', 'name': 'M',
-           'contextWindow': 1, 'maxTokens': 1, 'reasoning': false,
-           'thinking': null, 'input': [], 'cost': {}},
+          {
+            'provider': 'p',
+            'id': 'm',
+            'selector': 'm',
+            'name': 'M',
+            'contextWindow': 1,
+            'maxTokens': 1,
+            'reasoning': false,
+            'thinking': null,
+            'input': [],
+            'cost': {},
+          },
           'garbage',
         ],
       });

@@ -579,4 +579,48 @@ void main() {
       ]);
     });
   });
+
+  testWidgets('advisor is off by default and omitted from the create body', (
+    tester,
+  ) async {
+    final gateway = FakeGateway();
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    final sw = find.byKey(const ValueKey('new-session-advisor'));
+    expect(sw, findsOneWidget);
+    expect(tester.widget<SwitchListTile>(sw).value, isFalse);
+    await tester.enterText(find.byType(TextField).first, '/work/newproj');
+    await tester.tap(find.text('Start'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect((gateway.bodies.single as Map).containsKey('advisor'), isFalse);
+  });
+
+  testWidgets('turning advisor on sends advisor: true', (tester) async {
+    final gateway = FakeGateway();
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    await tester.enterText(find.byType(TextField).first, '/work/newproj');
+    final sw = find.byKey(const ValueKey('new-session-advisor'));
+    await tester.ensureVisible(sw);
+    await tester.tap(sw);
+    await tester.pump();
+    expect(tester.widget<SwitchListTile>(sw).value, isTrue);
+    await tester.tap(find.text('Start'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(gateway.bodies.single, {
+      'cwd': '/work/newproj',
+      'approvalMode': 'yolo',
+      'advisor': true,
+    });
+  });
 }

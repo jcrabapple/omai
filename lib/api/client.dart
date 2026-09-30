@@ -21,8 +21,8 @@ class GatewayClient {
     required this.token,
     http.Client? client,
     this.timeout = const Duration(seconds: 30),
-  })  : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
-        _client = client ?? http.Client();
+  }) : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
+       _client = client ?? http.Client();
 
   /// Base URL without trailing slashes; e.g. `https://gateway.example.com`.
   final String baseUrl;
@@ -38,7 +38,9 @@ class GatewayClient {
   }
 
   String _queryString(Map<String, String> query) =>
-      Uri(queryParameters: query).query.isEmpty ? '' : '?${Uri(queryParameters: query).query}';
+      Uri(queryParameters: query).query.isEmpty
+      ? ''
+      : '?${Uri(queryParameters: query).query}';
 
   Uri _uri(String path, [Map<String, String>? query]) {
     var suffix = '';
@@ -47,9 +49,9 @@ class GatewayClient {
   }
 
   Map<String, String> _headers({bool jsonBody = false}) => {
-        'Authorization': 'Bearer $token',
-        if (jsonBody) 'Content-Type': 'application/json',
-      };
+    'Authorization': 'Bearer $token',
+    if (jsonBody) 'Content-Type': 'application/json',
+  };
 
   Future<Map<String, dynamic>> _send(
     String method,
@@ -75,9 +77,11 @@ class GatewayClient {
 
     late http.Response res;
     try {
-      final streamed =
-          await _client.send(request).timeout(timeout ?? this.timeout);
-      res = await http.Response.fromStream(streamed).timeout(timeout ?? this.timeout);
+      final streamed = await _client
+          .send(request)
+          .timeout(timeout ?? this.timeout);
+      res = await http.Response.fromStream(streamed)
+          .timeout(timeout ?? this.timeout);
     } on TimeoutException {
       throw const Offline('The gateway did not answer in time.');
     } on SocketException {
@@ -131,9 +135,12 @@ class GatewayClient {
   Future<Map<String, dynamic>> system() => _send('GET', '/api/system');
 
   Future<CatalogModels> catalogModels({bool refresh = false}) async {
-    final json = await _send('GET', '/api/catalog/models',
-        query: refresh ? {'refresh': '1'} : null,
-        timeout: const Duration(minutes: 3));
+    final json = await _send(
+      'GET',
+      '/api/catalog/models',
+      query: refresh ? {'refresh': '1'} : null,
+      timeout: const Duration(minutes: 3),
+    );
     return CatalogModels.fromJson(json);
   }
 
@@ -144,16 +151,27 @@ class GatewayClient {
 
   /// Escape hatch: any omp RpcCommand, returned as `{data}`.
   Future<Map<String, dynamic>> rpc(String id, Map<String, dynamic> command) =>
-      _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/rpc', body: command);
+      _send(
+        'POST',
+        '/api/sessions/${Uri.encodeComponent(id)}/rpc',
+        body: command,
+      );
 
   // ------------------------------------------------------------- sessions
 
-  Future<SessionsList> sessions({int limit = 60, bool includeSaved = true}) async {
-    final json = await _send('GET', '/api/sessions', query: {
-      'limit': '$limit',
-      // Always explicit: the gateway defaults include_saved to True.
-      'include_saved': includeSaved ? 'true' : 'false',
-    });
+  Future<SessionsList> sessions({
+    int limit = 60,
+    bool includeSaved = true,
+  }) async {
+    final json = await _send(
+      'GET',
+      '/api/sessions',
+      query: {
+        'limit': '$limit',
+        // Always explicit: the gateway defaults include_saved to True.
+        'include_saved': includeSaved ? 'true' : 'false',
+      },
+    );
     return SessionsList.fromJson(json);
   }
 
@@ -163,18 +181,27 @@ class GatewayClient {
     String? thinking,
     String? approvalMode,
     String? resumeFrom,
+    bool advisor = false,
   }) {
-    return _send('POST', '/api/sessions', body: {
-      'cwd': ?cwd,
-      'model': ?model,
-      'thinking': ?thinking,
-      'approvalMode': ?approvalMode,
-      'resumeFrom': ?resumeFrom,
-    }).then(SessionInfo.fromJson);
+    return _send(
+      'POST',
+      '/api/sessions',
+      body: {
+        'cwd': ?cwd,
+        'model': ?model,
+        'thinking': ?thinking,
+        'approvalMode': ?approvalMode,
+        'resumeFrom': ?resumeFrom,
+        // Sent only when on, like the web client, so older gateways never see it.
+        if (advisor) 'advisor': true,
+      },
+    ).then(SessionInfo.fromJson);
   }
 
-  Future<SessionInfo> sessionInfo(String id) =>
-      _send('GET', '/api/sessions/${Uri.encodeComponent(id)}').then(SessionInfo.fromJson);
+  Future<SessionInfo> sessionInfo(String id) => _send(
+    'GET',
+    '/api/sessions/${Uri.encodeComponent(id)}',
+  ).then(SessionInfo.fromJson);
 
   /// Stop the child; the transcript stays on disk.
   Future<void> deleteSession(String id) async {
@@ -187,11 +214,16 @@ class GatewayClient {
     String mode = 'prompt',
     List<Map<String, String>>? images,
   }) {
-    return _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/prompt', body: {
-      'message': message,
-      'mode': mode,
-      if (images != null && images.isNotEmpty) 'images': images,
-    }, timeout: const Duration(seconds: 60)).then(SessionInfo.fromJson);
+    return _send(
+      'POST',
+      '/api/sessions/${Uri.encodeComponent(id)}/prompt',
+      body: {
+        'message': message,
+        'mode': mode,
+        if (images != null && images.isNotEmpty) 'images': images,
+      },
+      timeout: const Duration(seconds: 60),
+    ).then(SessionInfo.fromJson);
   }
 
   Future<void> abort(String id) async {
@@ -200,9 +232,14 @@ class GatewayClient {
 
   /// Ask omp to compact the session context. `instructions` steers what to keep.
   Future<Map<String, dynamic>> compact(String id, {String? instructions}) =>
-      _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/compact', body: {
-        if (instructions != null && instructions.isNotEmpty) 'instructions': instructions,
-      });
+      _send(
+        'POST',
+        '/api/sessions/${Uri.encodeComponent(id)}/compact',
+        body: {
+          if (instructions != null && instructions.isNotEmpty)
+            'instructions': instructions,
+        },
+      );
 
   Future<Map<String, dynamic>> state(String id) =>
       _send('GET', '/api/sessions/${Uri.encodeComponent(id)}/state');
@@ -214,18 +251,27 @@ class GatewayClient {
       _send('GET', '/api/sessions/${Uri.encodeComponent(id)}/stats');
 
   Future<void> setModel(String id, String provider, String modelId) async {
-    await _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/model',
-        body: {'provider': provider, 'modelId': modelId});
+    await _send(
+      'POST',
+      '/api/sessions/${Uri.encodeComponent(id)}/model',
+      body: {'provider': provider, 'modelId': modelId},
+    );
   }
 
   Future<void> setThinking(String id, String level) async {
-    await _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/thinking',
-        body: {'level': level});
+    await _send(
+      'POST',
+      '/api/sessions/${Uri.encodeComponent(id)}/thinking',
+      body: {'level': level},
+    );
   }
 
   Future<void> setName(String id, String name) async {
-    await _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/name',
-        body: {'name': name});
+    await _send(
+      'POST',
+      '/api/sessions/${Uri.encodeComponent(id)}/name',
+      body: {'name': name},
+    );
   }
 
   Future<Map<String, dynamic>> commands(String id) =>
@@ -233,18 +279,30 @@ class GatewayClient {
 
   /// Event backlog since a cursor: `{events, lastSeq, gap}`.
   Future<Map<String, dynamic>> events(String id, {int after = 0}) => _send(
-      'GET', '/api/sessions/${Uri.encodeComponent(id)}/events',
-      query: {'after': '$after'});
+    'GET',
+    '/api/sessions/${Uri.encodeComponent(id)}/events',
+    query: {'after': '$after'},
+  );
 
   /// Dialogs omp is blocked on: `{pending: [...]}`.
   Future<List<Map<String, Object?>>> pendingUi(String id) async {
-    final json = await _send('GET', '/api/sessions/${Uri.encodeComponent(id)}/ui');
+    final json = await _send(
+      'GET',
+      '/api/sessions/${Uri.encodeComponent(id)}/ui',
+    );
     return rawMapList(json['pending']);
   }
 
   /// Answer one dialog.
-  Future<void> answerUi(String id, String requestId, Map<String, Object?> answer) async {
-    await _send('POST', '/api/sessions/${Uri.encodeComponent(id)}/ui/${Uri.encodeComponent(requestId)}',
-        body: answer);
+  Future<void> answerUi(
+    String id,
+    String requestId,
+    Map<String, Object?> answer,
+  ) async {
+    await _send(
+      'POST',
+      '/api/sessions/${Uri.encodeComponent(id)}/ui/${Uri.encodeComponent(requestId)}',
+      body: answer,
+    );
   }
 }

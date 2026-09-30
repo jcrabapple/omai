@@ -113,6 +113,7 @@ class SessionInfo {
     required this.ompSessionName,
     required this.model,
     required this.thinkingLevel,
+    this.advisor = false,
     required this.isStreaming,
     required this.idleSec,
     required this.exited,
@@ -140,6 +141,8 @@ class SessionInfo {
       ompSessionName: str(m['ompSessionName']),
       model: asMap(m['model']) == null ? null : ModelRef.fromJson(m['model']),
       thinkingLevel: str(m['thinkingLevel']),
+      // Missing on gateways older than the advisor launch flag: treat as off.
+      advisor: boolVal(m['advisor']) ?? false,
       isStreaming: boolVal(m['isStreaming']) ?? false,
       idleSec: dbl(m['idleSec']) ?? 0,
       exited: boolVal(m['exited']) ?? false,
@@ -167,6 +170,10 @@ class SessionInfo {
   final String? ompSessionName;
   final ModelRef? model;
   final String? thinkingLevel;
+
+  /// omp's advisor runtime (reviews each turn, injects notes). Launch-time
+  /// only: set on POST /sessions, carried through forks, never toggled live.
+  final bool advisor;
   final bool isStreaming;
   final double idleSec;
   final bool exited;

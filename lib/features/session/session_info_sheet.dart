@@ -159,6 +159,12 @@ class SessionInfoSheet extends ConsumerWidget {
                     ),
                     _row(
                       context,
+                      'Advisor',
+                      info.advisor ? 'On' : 'Off',
+                      tokens,
+                    ),
+                    _row(
+                      context,
                       'Context',
                       usage == null
                           ? 'Not reported yet'

@@ -132,6 +132,9 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
   CatalogModel? _model;
   String _thinking = '';
   String _approval = 'yolo';
+
+  /// omp's advisor runtime. Off by default, launch-time only (web parity).
+  bool _advisor = false;
   bool _starting = false;
   String? _error;
 
@@ -209,6 +212,7 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
         model: _model?.selector,
         thinking: _thinking.isEmpty ? null : _thinking,
         approvalMode: _approval,
+        advisor: _advisor,
       );
       if (!mounted) return;
       ref.read(lastCwdProvider.notifier).set(dir);
@@ -399,6 +403,52 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
                 selected: _approval == mode.id,
                 onTap: () => setState(() => _approval = mode.id),
               ),
+            const SizedBox(height: OmpMetrics.s3),
+            // Web NewSessionSheet "Enable advisor". Launch-time only in omp,
+            // so it lives here and not in the session info sheet.
+            Material(
+              color: _advisor ? tokens.accentSoft : tokens.inset,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
+                side: _advisor
+                    ? BorderSide(color: tokens.accent, width: 2)
+                    : BorderSide(color: tokens.line),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SwitchListTile(
+                key: const ValueKey('new-session-advisor'),
+                value: _advisor,
+                onChanged: _starting
+                    ? null
+                    : (v) => setState(() => _advisor = v),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: OmpMetrics.s3,
+                ),
+                activeThumbColor: tokens.accentInk,
+                activeTrackColor: tokens.accent,
+                secondary: Icon(
+                  Icons.auto_awesome,
+                  size: 20,
+                  color: _advisor ? tokens.accent : tokens.ink3,
+                ),
+                title: Text(
+                  'Advisor',
+                  style: TextStyle(
+                    color: _advisor ? tokens.accent : tokens.ink,
+                    fontSize: OmpMetrics.fsBase,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  'Reviews each turn and adds notes. Can only be set when '
+                  'the session starts.',
+                  style: TextStyle(
+                    color: _advisor ? tokens.ink2 : tokens.ink3,
+                    fontSize: OmpMetrics.fsSm,
+                  ),
+                ),
+              ),
+            ),
             if (_error != null) ...[
               const SizedBox(height: OmpMetrics.s2),
               Semantics(

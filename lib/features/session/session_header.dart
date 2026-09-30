@@ -68,54 +68,60 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
             child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            info?.title ?? 'Session',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: tokens.ink,
-              fontSize: OmpMetrics.fsLg,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 2),
-          SizedBox(
-            height: 18,
-            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                if (model.isNotEmpty) ...[
-                  Flexible(
-                    child: Text(
-                      model,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: tokens.ink3,
-                        fontSize: OmpMetrics.fsXs,
-                      ),
-                    ),
+                Text(
+                  info?.title ?? 'Session',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: tokens.ink,
+                    fontSize: OmpMetrics.fsLg,
+                    fontWeight: FontWeight.w600,
                   ),
-                  const SizedBox(width: OmpMetrics.s3),
-                ],
-                _ContextMeterFromState(info: info, stats: state.stats),
-                if (cost != null) ...[
-                  const SizedBox(width: OmpMetrics.s3),
-                  Text(
-                    cost,
-                    style: TextStyle(
-                      color: tokens.ink2,
-                      fontSize: OmpMetrics.fsXs,
-                    ),
+                ),
+                const SizedBox(height: 2),
+                SizedBox(
+                  height: 18,
+                  child: Row(
+                    children: [
+                      // Web SessionHeader "Advisor" chip: omp's advisor runtime is
+                      // on for this session (launch-time, so it never flips live).
+                      if (info?.advisor ?? false) ...[
+                        const AdvisorChip(),
+                        const SizedBox(width: OmpMetrics.s2),
+                      ],
+                      if (model.isNotEmpty) ...[
+                        Flexible(
+                          child: Text(
+                            model,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: tokens.ink3,
+                              fontSize: OmpMetrics.fsXs,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: OmpMetrics.s3),
+                      ],
+                      _ContextMeterFromState(info: info, stats: state.stats),
+                      if (cost != null) ...[
+                        const SizedBox(width: OmpMetrics.s3),
+                        Text(
+                          cost,
+                          style: TextStyle(
+                            color: tokens.ink2,
+                            fontSize: OmpMetrics.fsXs,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: OmpMetrics.s3),
+                      Flexible(child: ConnectionDot(status: state.connection)),
+                    ],
                   ),
-                ],
-                const SizedBox(width: OmpMetrics.s3),
-                Flexible(child: ConnectionDot(status: state.connection)),
-              ],
-            ),
-          ),
+                ),
               ],
             ),
           ),
@@ -348,6 +354,45 @@ class _ActivityLineState extends State<ActivityLine> {
             style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsXs),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Compact "Advisor" marker for the session header's 18dp metadata row.
+class AdvisorChip extends StatelessWidget {
+  const AdvisorChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<OmpTokens>()!;
+    return Semantics(
+      label: 'Advisor on',
+      excludeSemantics: true,
+      child: Container(
+        key: const ValueKey('session-advisor-chip'),
+        padding: const EdgeInsets.symmetric(horizontal: OmpMetrics.s1 + 2),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(OmpMetrics.radiusSm),
+          border: Border.all(color: tokens.accent),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.auto_awesome, size: 11, color: tokens.accent),
+            const SizedBox(width: 3),
+            Text(
+              'Advisor',
+              maxLines: 1,
+              style: TextStyle(
+                color: tokens.accent,
+                fontSize: OmpMetrics.fsXs,
+                fontWeight: FontWeight.w600,
+                height: 1.2,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

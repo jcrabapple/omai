@@ -221,6 +221,28 @@ Future<void> _pumpSheet(
 }
 
 void main() {
+  for (final on in [true, false]) {
+    testWidgets('the Model section says whether advisor is on ($on)', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final gateway = FakeGateway(info: {...infoJson(), 'advisor': on});
+      final container = _container(gateway: gateway, hub: SocketHub());
+      await _pumpSheet(tester, container);
+
+      final row = find.ancestor(
+        of: find.text('Advisor'),
+        matching: find.byType(Row),
+      );
+      expect(
+        find.descendant(of: row.first, matching: find.text(on ? 'On' : 'Off')),
+        findsOneWidget,
+      );
+    });
+  }
+
   testWidgets('shows where the open session runs and its model', (
     tester,
   ) async {

@@ -377,10 +377,12 @@ void main() {
       expect(
         tester
             .getSize(
-              find.ancestor(
-                of: find.textContaining('Jump to latest'),
-                matching: find.byType(InkWell),
-              ).first,
+              find
+                  .ancestor(
+                    of: find.textContaining('Jump to latest'),
+                    matching: find.byType(InkWell),
+                  )
+                  .first,
             )
             .height,
         greaterThanOrEqualTo(48.0),
@@ -790,4 +792,50 @@ void main() {
     await tester.pump();
     expect(gateway.bodies['/api/sessions/abc/ui/u1'], {'confirmed': true});
   });
+
+  for (final on in [true, false]) {
+    testWidgets('the header shows the Advisor chip only when advisor is on '
+        '($on)', (tester) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final hub = SocketHub();
+      final gateway = FakeGateway(messages: _history(2));
+      gateway.info = {
+        'gwId': 'abc',
+        'cwd': '/work/prompter',
+        'advisor': on,
+        'model': {
+          'id': 'z-ai/glm-5.3-flashx',
+          'provider': 'z-ai',
+          'name': 'GLM 5.3 FlashX Ultra Premium Extended Edition Model',
+        },
+      };
+      final container = _container(gateway: gateway, hub: hub);
+      addTearDown(container.dispose);
+      await _pumpReady(tester, container);
+
+      final chip = find.byKey(const ValueKey('session-advisor-chip'));
+      expect(chip, on ? findsOneWidget : findsNothing);
+      if (on) {
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Semantics && w.properties.label == 'Advisor on',
+          ),
+          findsOneWidget,
+        );
+        // Fits the 360dp metadata row next to a long model name.
+        expect(tester.getRect(chip).right, lessThanOrEqualTo(360));
+      }
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(theme: OmpTheme.data(OmpPreset.terminal)),
+        ),
+      );
+      await tester.pump(const Duration(seconds: 1));
+    });
+  }
 }

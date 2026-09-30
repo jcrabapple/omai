@@ -6,9 +6,16 @@ import 'package:http/testing.dart';
 import 'package:omai/api/client.dart';
 import 'package:omai/api/errors.dart';
 
-http.Response _json(Object? body, {int status = 200, Map<String, String> headers = const {}}) {
-  return http.Response(jsonEncode(body), status,
-      headers: {'content-type': 'application/json', ...headers});
+http.Response _json(
+  Object? body, {
+  int status = 200,
+  Map<String, String> headers = const {},
+}) {
+  return http.Response(
+    jsonEncode(body),
+    status,
+    headers: {'content-type': 'application/json', ...headers},
+  );
 }
 
 GatewayClient clientWith(MockClientHandler handler, {String token = 'tok'}) {
@@ -86,13 +93,17 @@ void main() {
 
   group('error classes', () {
     test('confirmed 401 throws AuthError', () async {
-      final client = clientWith((_) async => _json({'error': 'bad token'}, status: 401));
+      final client = clientWith(
+        (_) async => _json({'error': 'bad token'}, status: 401),
+      );
       await expectLater(client.me(), throwsA(isA<AuthError>()));
     });
 
     test('429 with retryAfterSec throws LockedOut', () async {
       final client = clientWith(
-          (_) async => _json({'error': 'locked', 'retryAfterSec': 60}, status: 429));
+        (_) async =>
+            _json({'error': 'locked', 'retryAfterSec': 60}, status: 429),
+      );
       try {
         await client.me();
         fail('should have thrown');
@@ -102,8 +113,13 @@ void main() {
     });
 
     test('429 with only a Retry-After header throws LockedOut', () async {
-      final client = clientWith((_) async => _json({'error': 'locked'}, status: 429,
-          headers: {'retry-after': '120'}));
+      final client = clientWith(
+        (_) async => _json(
+          {'error': 'locked'},
+          status: 429,
+          headers: {'retry-after': '120'},
+        ),
+      );
       try {
         await client.me();
         fail('should have thrown');
@@ -113,8 +129,11 @@ void main() {
     });
 
     test('bare 429 (session cap) is a GatewayError, not LockedOut', () async {
-      final client = clientWith((_) async =>
-          _json({'error': 'session limit reached (8); stop one first'}, status: 429));
+      final client = clientWith(
+        (_) async => _json({
+          'error': 'session limit reached (8); stop one first',
+        }, status: 429),
+      );
       try {
         await client.sessions();
         fail('should have thrown');
@@ -125,12 +144,22 @@ void main() {
     });
 
     test('FastAPI 422 detail list surfaces the first msg', () async {
-      final client = clientWith((_) async => _json({
-            'detail': [
-              {'loc': ['body', 'cwd'], 'msg': 'Field required', 'type': 'missing'},
-              {'loc': ['body', 'model'], 'msg': 'ignored', 'type': 'missing'},
-            ]
-          }, status: 422));
+      final client = clientWith(
+        (_) async => _json({
+          'detail': [
+            {
+              'loc': ['body', 'cwd'],
+              'msg': 'Field required',
+              'type': 'missing',
+            },
+            {
+              'loc': ['body', 'model'],
+              'msg': 'ignored',
+              'type': 'missing',
+            },
+          ],
+        }, status: 422),
+      );
       try {
         await client.startSession();
         fail('should have thrown');
@@ -141,7 +170,9 @@ void main() {
     });
 
     test('FastAPI 422 with a plain string detail keeps working', () async {
-      final client = clientWith((_) async => _json({'detail': 'message required'}, status: 422));
+      final client = clientWith(
+        (_) async => _json({'detail': 'message required'}, status: 422),
+      );
       try {
         await client.prompt('s1', '');
         fail('should have thrown');
@@ -151,22 +182,31 @@ void main() {
     });
 
     test('Cloudflare 400 with an HTML body throws EdgeRefused', () async {
-      final client = clientWith((_) async => http.Response(
-          '<!DOCTYPE html><html><body>Error 1000</body></html>', 400,
-          headers: {'content-type': 'text/html; charset=UTF-8'}));
+      final client = clientWith(
+        (_) async => http.Response(
+          '<!DOCTYPE html><html><body>Error 1000</body></html>',
+          400,
+          headers: {'content-type': 'text/html; charset=UTF-8'},
+        ),
+      );
       await expectLater(client.me(), throwsA(isA<EdgeRefused>()));
     });
 
     test('lowercase <!doctype html is still EdgeRefused', () async {
-      final client = clientWith((_) async => http.Response(
-          '<!doctype html><html><body>error 1000</body></html>', 400,
-          headers: {'content-type': 'text/plain'}));
+      final client = clientWith(
+        (_) async => http.Response(
+          '<!doctype html><html><body>error 1000</body></html>',
+          400,
+          headers: {'content-type': 'text/plain'},
+        ),
+      );
       await expectLater(client.me(), throwsA(isA<EdgeRefused>()));
     });
 
     test('plain JSON 400 stays a GatewayError, not EdgeRefused', () async {
-      final client =
-          clientWith((_) async => _json({'error': 'nope'}, status: 400));
+      final client = clientWith(
+        (_) async => _json({'error': 'nope'}, status: 400),
+      );
       try {
         await client.me();
         fail('should have thrown');
@@ -177,8 +217,9 @@ void main() {
     });
 
     test('JSON {error} on a 404 is a GatewayError', () async {
-      final client =
-          clientWith((_) async => _json({'error': 'not found'}, status: 404));
+      final client = clientWith(
+        (_) async => _json({'error': 'not found'}, status: 404),
+      );
       try {
         await client.sessionInfo('missing');
         fail('should have thrown');
@@ -189,8 +230,9 @@ void main() {
     });
 
     test('5xx is Offline, never an auth problem', () async {
-      final client =
-          clientWith((_) async => _json({'error': 'boom'}, status: 503));
+      final client = clientWith(
+        (_) async => _json({'error': 'boom'}, status: 503),
+      );
       await expectLater(client.me(), throwsA(isA<Offline>()));
     });
 
@@ -241,10 +283,16 @@ void main() {
       Uri? uiPath;
       final client = clientWith((req) async {
         if (req.url.path.endsWith('/ui')) {
-          return _json({'pending': [
-            {'id': 'r1', 'method': 'select', 'options': ['Approve', 'Deny']},
-            'junk',
-          ]});
+          return _json({
+            'pending': [
+              {
+                'id': 'r1',
+                'method': 'select',
+                'options': ['Approve', 'Deny'],
+              },
+              'junk',
+            ],
+          });
         }
         bodies.add(jsonDecode(req.body));
         uiPath = req.url;
@@ -258,14 +306,34 @@ void main() {
       expect(uiPath!.path, '/api/sessions/s1/ui/r1');
     });
 
+    test('startSession sends advisor only when it is on', () async {
+      final bodies = <Object?>[];
+      final client = clientWith((req) async {
+        bodies.add(jsonDecode(req.body));
+        return _json({'gwId': 'n1', 'cwd': '/w', 'advisor': true});
+      });
+      final info = await client.startSession(cwd: '/w', advisor: true);
+      await client.startSession(cwd: '/w');
+      expect(bodies, [
+        {'cwd': '/w', 'advisor': true},
+        {'cwd': '/w'},
+      ]);
+      expect(info.advisor, isTrue);
+    });
+
     test('startSession omits unset optional fields', () async {
       Object? body;
       final client = clientWith((req) async {
         body = jsonDecode(req.body);
-        return _json({'gwId': 'n1', 'cwd': '/home/user/projects/demo',
-            'alreadyLive': true});
+        return _json({
+          'gwId': 'n1',
+          'cwd': '/home/user/projects/demo',
+          'alreadyLive': true,
+        });
       });
-      final info = await client.startSession(resumeFrom: '/home/user/.omp/agent/sessions/f.jsonl');
+      final info = await client.startSession(
+        resumeFrom: '/home/user/.omp/agent/sessions/f.jsonl',
+      );
       expect(body, {'resumeFrom': '/home/user/.omp/agent/sessions/f.jsonl'});
       expect(info.alreadyLive, isTrue);
     });
@@ -276,7 +344,9 @@ void main() {
       final client = clientWith((req) async {
         uri = req.url;
         body = jsonDecode(req.body);
-        return _json({'data': {'x': 1}});
+        return _json({
+          'data': {'x': 1},
+        });
       });
       final res = await client.rpc('s1', {'id': 'c1', 'type': 'get_state'});
       expect(uri!.path, '/api/sessions/s1/rpc');
@@ -284,24 +354,30 @@ void main() {
       expect(res['data'], {'x': 1});
     });
 
-    test('compact posts to the session route, body omits empty instructions',
-        () async {
-      final bodies = <Object?>[];
-      final uris = <Uri>[];
-      final client = clientWith((req) async {
-        uris.add(req.url);
-        bodies.add(req.body.isEmpty ? null : jsonDecode(req.body));
-        return _json({'data': {'ok': true}});
-      });
-      await client.compact('s1', instructions: 'keep the plan');
-      await client.compact('s1');
-      expect(uris.map((u) => u.path),
-          ['/api/sessions/s1/compact', '/api/sessions/s1/compact']);
-      expect(bodies, [
-        {'instructions': 'keep the plan'},
-        {},
-      ]);
-    });
+    test(
+      'compact posts to the session route, body omits empty instructions',
+      () async {
+        final bodies = <Object?>[];
+        final uris = <Uri>[];
+        final client = clientWith((req) async {
+          uris.add(req.url);
+          bodies.add(req.body.isEmpty ? null : jsonDecode(req.body));
+          return _json({
+            'data': {'ok': true},
+          });
+        });
+        await client.compact('s1', instructions: 'keep the plan');
+        await client.compact('s1');
+        expect(uris.map((u) => u.path), [
+          '/api/sessions/s1/compact',
+          '/api/sessions/s1/compact',
+        ]);
+        expect(bodies, [
+          {'instructions': 'keep the plan'},
+          {},
+        ]);
+      },
+    );
 
     test('healthz returns ok', () async {
       final client = clientWith((_) async => _json({'ok': true}));
@@ -447,13 +523,16 @@ void main() {
           'message': 'see this',
           'mode': 'prompt',
           'images': [
-            {'type': 'image', 'data': 'QUJD', 'mimeType': 'image/png'}
+            {'type': 'image', 'data': 'QUJD', 'mimeType': 'image/png'},
           ],
         },
-        call: (GatewayClient c) => c.prompt(sid, 'see this',
-            images: const [
-              {'type': 'image', 'data': 'QUJD', 'mimeType': 'image/png'}
-            ]),
+        call: (GatewayClient c) => c.prompt(
+          sid,
+          'see this',
+          images: const [
+            {'type': 'image', 'data': 'QUJD', 'mimeType': 'image/png'},
+          ],
+        ),
       ),
       _Endpoint(
         name: 'abort',
