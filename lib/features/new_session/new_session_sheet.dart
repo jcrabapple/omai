@@ -5,12 +5,14 @@
 // [onCreated]; errors render inline, including the 429 session-cap message.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/errors.dart';
 import '../../api/models.dart';
 import '../../format.dart';
 import '../../state/connection_notifier.dart';
+import '../../state/hidden_cwds.dart';
 import '../../state/session_controller.dart';
 import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
@@ -54,9 +56,15 @@ Set<String> missingCwds(List<SavedSession> saved) => {
 /// and so is one with no recorded cwd, whose `cwdFolder` is omp's mangled
 /// directory name rather than a path. A missing `cwdExists` (older gateway)
 /// counts as unknown and stays.
-List<String> recentCwds(List<SessionInfo> live, List<SavedSession> saved) {
+/// [hidden] are folders the user removed with a long-press (device-local,
+/// see state/hidden_cwds.dart); skipping them lets older folders fill in.
+List<String> recentCwds(
+  List<SessionInfo> live,
+  List<SavedSession> saved, {
+  Set<String> hidden = const {},
+}) {
   final missing = missingCwds(saved);
-  final seen = <String>{...missing};
+  final seen = <String>{...missing, ...hidden};
   final out = <String>[];
   for (final cwd in [
     ...live.map((s) => s.cwd),
@@ -127,6 +135,24 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
   bool _starting = false;
   String? _error;
 
+  /// The folder just removed from the chips, offered back via Undo until the
+  /// next removal or until the sheet closes. Inline, not a SnackBar: a
+  /// SnackBar would appear on the scaffold behind this sheet.
+  String? _removed;
+
+  Future<void> _removeRecent(String dir) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _removed = dir);
+    await ref.read(hiddenCwdsProvider.notifier).hide(dir);
+  }
+
+  Future<void> _undoRemove() async {
+    final dir = _removed;
+    if (dir == null) return;
+    setState(() => _removed = null);
+    await ref.read(hiddenCwdsProvider.notifier).unhide(dir);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -186,6 +212,8 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
       );
       if (!mounted) return;
       ref.read(lastCwdProvider.notifier).set(dir);
+      // Used again, so it's recent again.
+      unawaited(ref.read(hiddenCwdsProvider.notifier).unhide(dir));
       // Pop first: onCreated pushes the session screen, and a pop after
       // that would remove the session route instead of this sheet.
       Navigator.of(context).pop();
@@ -221,7 +249,11 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
       (_, next) => _dropMissingPrefill(next.saved),
     );
     final sessions = ref.watch(sessionsStoreProvider);
-    final suggestions = recentCwds(sessions.live, sessions.saved);
+    final suggestions = recentCwds(
+      sessions.live,
+      sessions.saved,
+      hidden: ref.watch(hiddenCwdsProvider),
+    );
     final current = _model == null
         ? null
         : CurrentModel(provider: _model!.provider, id: _model!.id);
@@ -266,18 +298,50 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
                 runSpacing: OmpMetrics.s1,
                 children: [
                   for (final dir in suggestions)
+                    // Tap fills the field; long-press removes the folder
+                    // from the recent list. No tooltip: on a phone a tooltip
+                    // is itself a long-press and would fight the removal.
                     Semantics(
+                      key: ValueKey('recent-cwd:$dir'),
                       label: 'Use $dir',
                       button: true,
-                      child: ActionChip(
-                        label: Text(basename(dir)),
-                        tooltip: dir,
-                        onPressed: () => _cwd.text = dir,
+                      hint: 'Long press to remove from recent folders',
+                      onLongPress: () => _removeRecent(dir),
+                      child: GestureDetector(
+                        onLongPress: () => _removeRecent(dir),
+                        child: ActionChip(
+                          label: Text(basename(dir)),
+                          onPressed: () => _cwd.text = dir,
+                        ),
                       ),
                     ),
                 ],
               ),
             ],
+            if (_removed != null)
+              Semantics(
+                liveRegion: true,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Removed ${basename(_removed!)} from recent folders',
+                        style: TextStyle(
+                          color: tokens.ink3,
+                          fontSize: OmpMetrics.fsSm,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _undoRemove,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(OmpMetrics.hit, OmpMetrics.hit),
+                      ),
+                      child: const Text('Undo'),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: OmpMetrics.s4),
             Text(
               'Model',

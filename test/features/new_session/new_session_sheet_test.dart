@@ -20,6 +20,7 @@ import 'package:ohmypi/features/new_session/new_session_sheet.dart';
 import 'package:ohmypi/features/session/session_screen.dart';
 import 'package:ohmypi/state/connection_notifier.dart';
 import 'package:ohmypi/state/connection_store.dart';
+import 'package:ohmypi/state/hidden_cwds.dart';
 import 'package:ohmypi/state/reviewed_store.dart';
 import 'package:ohmypi/state/session_controller.dart';
 import 'package:ohmypi/state/sessions_store.dart';
@@ -109,7 +110,7 @@ class _MemoryKv implements ReviewedKv {
   Future<void> set(String key, String value) async => _map[key] = value;
 }
 
-ProviderContainer _container(FakeGateway gateway) {
+ProviderContainer _container(FakeGateway gateway, {_MemoryKv? kv}) {
   final env = SessionEnv(
     client: GatewayClient(
       baseUrl: 'https://g',
@@ -126,7 +127,7 @@ ProviderContainer _container(FakeGateway gateway) {
   );
   final container = ProviderContainer(
     overrides: [
-      reviewedKvProvider.overrideWithValue(_MemoryKv()),
+      reviewedKvProvider.overrideWithValue(kv ?? _MemoryKv()),
       draftKvProvider.overrideWithValue(_MemoryDraftKv()),
       connectionPrefsProvider.overrideWithValue(
         MemoryPrefs(const [
@@ -476,5 +477,106 @@ void main() {
     await tester.pump();
     final field = tester.widget<TextField>(find.byType(TextField).first);
     expect(field.controller!.text, '/work/gone-e2e');
+  });
+
+  group('long-press removes a recent folder', () {
+    FakeGateway gw() => FakeGateway(
+      saved: [
+        savedEntry('/work/alpha', exists: true, folder: 'a'),
+        savedEntry('/work/beta', exists: true, folder: 'b'),
+      ],
+    );
+
+    testWidgets('hides it, persists per connection, and survives a reopen', (
+      tester,
+    ) async {
+      final kv = _MemoryKv();
+      final container = _container(gw(), kv: kv);
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+
+      expect(find.text('alpha'), findsOneWidget);
+      await tester.longPress(find.text('alpha'));
+      await tester.pumpAndSettle();
+      expect(find.text('alpha'), findsNothing);
+      expect(find.text('beta'), findsOneWidget);
+      expect(find.text('Removed alpha from recent folders'), findsOneWidget);
+      // A long-press must not also fill the field.
+      final field = tester.widget<TextField>(find.byType(TextField).first);
+      expect(field.controller!.text, isNot('/work/alpha'));
+      expect(await kv.get(hiddenCwdsKey('c1')), contains('/work/alpha'));
+
+      // A fresh app run (new container, same storage) still hides it.
+      final again = _container(gw(), kv: kv);
+      addTearDown(again.dispose);
+      // Tear the old tree down first: re-pumping the same MaterialApp would
+      // keep the first run's open sheet route alive.
+      await tester.pumpWidget(const SizedBox());
+      again.read(hiddenCwdsProvider);
+      await tester.pump();
+      await _pump(tester, again);
+      expect(find.text('alpha'), findsNothing);
+      expect(find.text('beta'), findsOneWidget);
+    });
+
+    testWidgets('Undo brings it back', (tester) async {
+      final container = _container(gw());
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+
+      await tester.longPress(find.text('alpha'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      expect(find.text('alpha'), findsOneWidget);
+      expect(find.text('Undo'), findsNothing);
+      expect(container.read(hiddenCwdsProvider), isEmpty);
+    });
+
+    testWidgets('a tap still fills the field', (tester) async {
+      final container = _container(gw());
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+
+      await tester.tap(find.text('beta'));
+      await tester.pump();
+      final field = tester.widget<TextField>(find.byType(TextField).first);
+      expect(field.controller!.text, '/work/beta');
+      expect(container.read(hiddenCwdsProvider), isEmpty);
+    });
+
+    testWidgets('starting a session in a hidden folder makes it recent again', (
+      tester,
+    ) async {
+      final container = _container(gw());
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+
+      await tester.longPress(find.text('alpha'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, '/work/alpha');
+      await tester.tap(find.text('Start'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(
+        container.read(hiddenCwdsProvider),
+        isNot(contains('/work/alpha')),
+      );
+    });
+
+    test('recentCwds fills the freed slot with the next folder', () {
+      final saved = [
+        for (var i = 0; i < 7; i++)
+          SavedSession.fromJson(savedEntry('/w/f$i', exists: true)),
+      ];
+      expect(recentCwds(const [], saved, hidden: {'/w/f1'}), [
+        '/w/f0',
+        '/w/f2',
+        '/w/f3',
+        '/w/f4',
+        '/w/f5',
+      ]);
+    });
   });
 }
