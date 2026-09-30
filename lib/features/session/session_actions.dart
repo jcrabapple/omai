@@ -225,7 +225,7 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
       },
       itemBuilder: (context) => [
         const PopupMenuItem(value: 'changes', child: Text('Changes')),
-        const PopupMenuItem(value: 'agents', child: Text('Agents')),
+        const PopupMenuItem(value: 'agents', child: Text('Helpers')),
         const PopupMenuItem(value: 'rename', child: Text('Rename')),
         const PopupMenuItem(value: 'compact', child: Text('Compact')),
         if (!done) const PopupMenuItem(value: 'done', child: Text('Mark done')),

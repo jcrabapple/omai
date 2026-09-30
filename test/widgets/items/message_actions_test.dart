@@ -1,6 +1,7 @@
-// MessageActions, review #6: long-press belongs to the SelectionArea (it
-// selects a word and shows the toolbar with Inspect / Retry turn); the
-// overflow button opens the same menu without selecting.
+// MessageActions: a long-press anywhere on the message opens the same action
+// menu the overflow button opens (the device-review pattern, e.g. ChatGPT on
+// Android), with haptic feedback. 'Select text' opens a bottom sheet where
+// the text stays selectable. The overflow button keeps working unchanged.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:omai/transcript/items.dart';
@@ -12,42 +13,56 @@ AssistantItem _item(String text) =>
     AssistantItem(id: 'a1', text: text, streaming: false, raw: {'k': 'v'});
 
 void main() {
-  testWidgets(
-    'long-press selects a word and the selection toolbar offers Inspect',
-    (tester) async {
-      Object? inspected;
-      await pumpOmp(
-        tester,
-        AssistantMessage(
-          item: _item('select me please'),
-          onInspect: (raw) => inspected = raw,
-        ),
-      );
+  testWidgets('long-press opens the message action menu with Inspect', (
+    tester,
+  ) async {
+    Object? inspected;
+    await pumpOmp(
+      tester,
+      AssistantMessage(
+        item: _item('select me please'),
+        onInspect: (raw) => inspected = raw,
+      ),
+    );
 
-      // The long press selects: the toolbar appearing with Copy (only shown
-      // for a non-empty selection) is the observable proof, and our custom
-      // Inspect item rides in the same toolbar.
-      await tester.longPress(find.text('select me please'));
-      await tester.pumpAndSettle();
+    await tester.longPress(find.text('select me please'));
+    await tester.pumpAndSettle();
 
-      expect(
-        find.text('Copy'),
-        findsOneWidget,
-        reason: 'a non-empty selection shows the Copy toolbar item',
-      );
-      expect(
-        find.text('Inspect'),
-        findsOneWidget,
-        reason: 'message actions live in the selection toolbar',
-      );
+    // The same menu the overflow button opens, plus Select text.
+    expect(find.text('Inspect'), findsOneWidget);
+    expect(find.text('Copy'), findsOneWidget);
+    expect(find.text('Select text'), findsOneWidget);
 
-      await tester.tap(find.text('Inspect'));
-      await tester.pumpAndSettle();
-      expect(inspected, isNotNull);
-      // The toolbar dismissed with the action: no dead button row left.
-      expect(find.text('Inspect'), findsNothing);
-    },
-  );
+    await tester.tap(find.text('Inspect'));
+    await tester.pumpAndSettle();
+    expect(inspected, isNotNull);
+    expect(find.text('Inspect'), findsNothing);
+  });
+
+  testWidgets("'Select text' opens a selectable-text bottom sheet", (
+    tester,
+  ) async {
+    await pumpOmp(
+      tester,
+      AssistantMessage(item: _item('select me please'), onInspect: (_) {}),
+    );
+    await tester.longPress(find.text('select me please'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Select text'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SelectableText), findsOneWidget);
+    expect(
+      tester.widget<SelectableText>(find.byType(SelectableText)).data,
+      'select me please',
+    );
+    final route = ModalRoute.of(tester.element(find.byType(SelectableText)));
+    expect(route, isA<ModalBottomSheetRoute>());
+    final sheet = route! as ModalBottomSheetRoute;
+    expect(sheet.useSafeArea, isTrue);
+    expect(sheet.isScrollControlled, isTrue);
+  });
 
   testWidgets('the overflow button opens the same menu without selecting', (
     tester,
@@ -62,8 +77,8 @@ void main() {
 
     expect(
       find.byType(PopupMenuItem<String>),
-      findsNWidgets(2),
-      reason: 'Copy, Inspect (fork is a user-bubble action)',
+      findsNWidgets(3),
+      reason: 'Copy, Inspect, Select text (fork is a user-bubble action)',
     );
     expect(find.text('Fork from here'), findsNothing);
     await tester.tap(find.text('Copy'));
@@ -71,7 +86,7 @@ void main() {
     expect(find.byType(PopupMenuItem<String>), findsNothing);
   });
 
-  testWidgets('no overflow affordance while the message is streaming', (
+  testWidgets('no menu and no overflow affordance while the message streams', (
     tester,
   ) async {
     await pumpOmp(
@@ -86,5 +101,9 @@ void main() {
       ),
     );
     expect(find.byTooltip('Message actions'), findsNothing);
+    await tester.longPress(find.byType(AssistantMessage));
+    await tester.pumpAndSettle();
+    expect(find.text('Inspect'), findsNothing);
+    expect(find.byType(PopupMenuItem<String>), findsNothing);
   });
 }

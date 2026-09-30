@@ -296,11 +296,16 @@ void main() {
     expect(find.byType(UserBubble), findsNWidgets(2));
     final pendingBubble = find.widgetWithText(UserBubble, 'a new message');
     expect(pendingBubble, findsOneWidget);
-    final overflow = find.descendant(
-      of: pendingBubble,
-      matching: find.byTooltip('Message actions'),
+    // Pending bubbles offer no menu at all: no overflow button and a
+    // long-press opens nothing (device review: disabled rules kept).
+    expect(
+      find.descendant(
+        of: pendingBubble,
+        matching: find.byTooltip('Message actions'),
+      ),
+      findsNothing,
     );
-    await tester.tap(overflow);
+    await tester.longPress(pendingBubble);
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Fork from here'), findsNothing);

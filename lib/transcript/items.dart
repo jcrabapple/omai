@@ -23,7 +23,8 @@ sealed class Item {
   Map<String, Object?> normalized();
 }
 
-typedef UserNote = String; // 'steer' | 'steer-pending' | 'queued' | 'other-client'
+typedef UserNote =
+    String; // 'steer' | 'steer-pending' | 'queued' | 'other-client'
 
 class UserItem extends Item {
   final String text;
@@ -79,36 +80,35 @@ class UserItem extends Item {
     bool clearMessageKey = false,
     Object? raw,
     bool clearRaw = false,
-  }) =>
-      UserItem(
-        id: id ?? this.id,
-        text: text ?? this.text,
-        images: images ?? this.images,
-        pending: pending ?? this.pending,
-        note: clearNote ? null : (note ?? this.note),
-        stale: stale ?? this.stale,
-        failed: failed ?? this.failed,
-        error: clearError ? null : (error ?? this.error),
-        timestamp: clearTimestamp ? null : (timestamp ?? this.timestamp),
-        localId: clearLocalId ? null : (localId ?? this.localId),
-        messageKey: clearMessageKey ? null : (messageKey ?? this.messageKey),
-        raw: clearRaw ? null : (raw ?? this.raw),
-      );
+  }) => UserItem(
+    id: id ?? this.id,
+    text: text ?? this.text,
+    images: images ?? this.images,
+    pending: pending ?? this.pending,
+    note: clearNote ? null : (note ?? this.note),
+    stale: stale ?? this.stale,
+    failed: failed ?? this.failed,
+    error: clearError ? null : (error ?? this.error),
+    timestamp: clearTimestamp ? null : (timestamp ?? this.timestamp),
+    localId: clearLocalId ? null : (localId ?? this.localId),
+    messageKey: clearMessageKey ? null : (messageKey ?? this.messageKey),
+    raw: clearRaw ? null : (raw ?? this.raw),
+  );
 
   @override
   Map<String, Object?> normalized() => {
-        'kind': kind,
-        'id': id,
-        if (messageKey != null) 'messageKey': messageKey,
-        'text': text,
-        'images': images,
-        'pending': pending,
-        if (stale != null) 'stale': stale,
-        if (failed != null) 'failed': failed,
-        if (error != null) 'error': error,
-        if (timestamp != null) 'timestamp': timestamp,
-        if (localId != null) 'localId': localId,
-      };
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'text': text,
+    'images': images,
+    'pending': pending,
+    if (stale != null) 'stale': stale,
+    if (failed != null) 'failed': failed,
+    if (error != null) 'error': error,
+    if (timestamp != null) 'timestamp': timestamp,
+    if (localId != null) 'localId': localId,
+  };
 }
 
 class AssistantItem extends Item {
@@ -145,37 +145,37 @@ class AssistantItem extends Item {
   String get kind => 'assistant';
 
   AssistantItem copyWith({bool? streaming}) => AssistantItem(
-        id: id,
-        text: text,
-        streaming: streaming ?? this.streaming,
-        model: model,
-        provider: provider,
-        usage: usage,
-        stopReason: stopReason,
-        error: error,
-        timestamp: timestamp,
-        duration: duration,
-        ttft: ttft,
-        messageKey: messageKey,
-        raw: raw,
-      );
+    id: id,
+    text: text,
+    streaming: streaming ?? this.streaming,
+    model: model,
+    provider: provider,
+    usage: usage,
+    stopReason: stopReason,
+    error: error,
+    timestamp: timestamp,
+    duration: duration,
+    ttft: ttft,
+    messageKey: messageKey,
+    raw: raw,
+  );
 
   @override
   Map<String, Object?> normalized() => {
-        'kind': kind,
-        'id': id,
-        if (messageKey != null) 'messageKey': messageKey,
-        'text': text,
-        'streaming': streaming,
-        if (model != null) 'model': model,
-        if (provider != null) 'provider': provider,
-        if (usage != null) 'usage': usage,
-        if (stopReason != null) 'stopReason': stopReason,
-        if (error != null) 'error': error,
-        if (timestamp != null) 'timestamp': timestamp,
-        if (duration != null) 'duration': duration,
-        if (ttft != null) 'ttft': ttft,
-      };
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'text': text,
+    'streaming': streaming,
+    if (model != null) 'model': model,
+    if (provider != null) 'provider': provider,
+    if (usage != null) 'usage': usage,
+    if (stopReason != null) 'stopReason': stopReason,
+    if (error != null) 'error': error,
+    if (timestamp != null) 'timestamp': timestamp,
+    if (duration != null) 'duration': duration,
+    if (ttft != null) 'ttft': ttft,
+  };
 }
 
 class ThinkingItem extends Item {
@@ -207,25 +207,24 @@ class ThinkingItem extends Item {
     bool clearStartedAt = false,
     int? endedAt,
     bool clearEndedAt = false,
-  }) =>
-      ThinkingItem(
-        id: id,
-        text: text,
-        streaming: streaming ?? this.streaming,
-        startedAt: clearStartedAt ? null : (startedAt ?? this.startedAt),
-        endedAt: clearEndedAt ? null : (endedAt ?? this.endedAt),
-        messageKey: messageKey,
-        raw: raw,
-      );
+  }) => ThinkingItem(
+    id: id,
+    text: text,
+    streaming: streaming ?? this.streaming,
+    startedAt: clearStartedAt ? null : (startedAt ?? this.startedAt),
+    endedAt: clearEndedAt ? null : (endedAt ?? this.endedAt),
+    messageKey: messageKey,
+    raw: raw,
+  );
 
   @override
   Map<String, Object?> normalized() => {
-        'kind': kind,
-        'id': id,
-        if (messageKey != null) 'messageKey': messageKey,
-        'text': text,
-        'streaming': streaming,
-      };
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'text': text,
+    'streaming': streaming,
+  };
 }
 
 typedef ToolStatus = String; // 'running' | 'done' | 'error' | 'interrupted'
@@ -279,38 +278,37 @@ class ToolItem extends Item {
     bool clearMessageKey = false,
     Object? raw,
     bool clearRaw = false,
-  }) =>
-      ToolItem(
-        id: id,
-        toolCallId: toolCallId,
-        toolName: toolName,
-        args: args,
-        summary: summary,
-        intent: intent,
-        output: output,
-        status: status ?? this.status,
-        details: clearDetails ? null : (details ?? this.details),
-        files: clearFiles ? null : (files ?? this.files),
-        startedAt: startedAt,
-        endedAt: endedAt,
-        messageKey: clearMessageKey ? null : (messageKey ?? this.messageKey),
-        raw: clearRaw ? null : (raw ?? this.raw),
-      );
+  }) => ToolItem(
+    id: id,
+    toolCallId: toolCallId,
+    toolName: toolName,
+    args: args,
+    summary: summary,
+    intent: intent,
+    output: output,
+    status: status ?? this.status,
+    details: clearDetails ? null : (details ?? this.details),
+    files: clearFiles ? null : (files ?? this.files),
+    startedAt: startedAt,
+    endedAt: endedAt,
+    messageKey: clearMessageKey ? null : (messageKey ?? this.messageKey),
+    raw: clearRaw ? null : (raw ?? this.raw),
+  );
 
   @override
   Map<String, Object?> normalized() => {
-        'kind': kind,
-        'id': id,
-        if (messageKey != null) 'messageKey': messageKey,
-        'toolCallId': toolCallId,
-        'toolName': toolName,
-        if (args != null) 'args': args,
-        'summary': summary,
-        if (intent != null) 'intent': intent,
-        'output': output,
-        'status': status,
-        if (files != null) 'files': files,
-      };
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'toolCallId': toolCallId,
+    'toolName': toolName,
+    if (args != null) 'args': args,
+    'summary': summary,
+    if (intent != null) 'intent': intent,
+    'output': output,
+    'status': status,
+    if (files != null) 'files': files,
+  };
 }
 
 class SkillItem extends Item {
@@ -338,15 +336,15 @@ class SkillItem extends Item {
 
   @override
   Map<String, Object?> normalized() => {
-        'kind': kind,
-        'id': id,
-        if (messageKey != null) 'messageKey': messageKey,
-        'name': name,
-        'content': content,
-        if (prompt != null) 'prompt': prompt,
-        if (lineCount != null) 'lineCount': lineCount,
-        if (timestamp != null) 'timestamp': timestamp,
-      };
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'name': name,
+    'content': content,
+    if (prompt != null) 'prompt': prompt,
+    if (lineCount != null) 'lineCount': lineCount,
+    if (timestamp != null) 'timestamp': timestamp,
+  };
 }
 
 class CommandItem extends Item {
@@ -369,12 +367,12 @@ class CommandItem extends Item {
 
   @override
   Map<String, Object?> normalized() => {
-        'kind': kind,
-        'id': id,
-        if (messageKey != null) 'messageKey': messageKey,
-        'text': text,
-        if (command != null) 'command': command,
-      };
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'text': text,
+    if (command != null) 'command': command,
+  };
 }
 
 typedef NoticeTag = String; // 'compaction' | 'retry'
@@ -406,26 +404,108 @@ class NoticeItem extends Item {
     NoticeTag? tag,
     bool clearTag = false,
     bool? active,
-  }) =>
-      NoticeItem(
-        id: id,
-        level: level ?? this.level,
-        text: text ?? this.text,
-        tag: clearTag ? null : (tag ?? this.tag),
-        active: active ?? this.active,
-        messageKey: messageKey,
-        raw: raw,
-      );
+  }) => NoticeItem(
+    id: id,
+    level: level ?? this.level,
+    text: text ?? this.text,
+    tag: clearTag ? null : (tag ?? this.tag),
+    active: active ?? this.active,
+    messageKey: messageKey,
+    raw: raw,
+  );
 
   @override
   Map<String, Object?> normalized() => {
-        'kind': kind,
-        'id': id,
-        if (messageKey != null) 'messageKey': messageKey,
-        'level': level,
-        'text': text,
-        if (tag != null) 'tag': tag,
-        if (active != null) 'active': active,
-      };
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'level': level,
+    'text': text,
+    if (tag != null) 'tag': tag,
+    if (active != null) 'active': active,
+  };
 }
 
+/// One file attached by an @-mention in the preceding user message. `content`
+/// is the text omp attached (null for skipped or image files); it is never
+/// put into a semantics label or a log.
+class FileMentionFile {
+  final String path;
+  final String? content;
+  final int? lineCount;
+  final int? byteSize;
+
+  /// 'tooLarge' | 'binary', as the gateway reports.
+  final String? skippedReason;
+  final bool image;
+
+  const FileMentionFile({
+    required this.path,
+    this.content,
+    this.lineCount,
+    this.byteSize,
+    this.skippedReason,
+    this.image = false,
+  });
+
+  /// File name for the row label (the path goes in the content sheet).
+  String get name =>
+      path.split('/').where((p) => p.isNotEmpty).lastOrNull ?? path;
+
+  static List<FileMentionFile> listFrom(Object? files) {
+    final list = files is List ? files : const [];
+    final out = <FileMentionFile>[];
+    for (final e in list) {
+      if (e is! Map) continue;
+      final m = e.cast<String, Object?>();
+      final path = m['path'];
+      if (path is! String || path.isEmpty) continue;
+      out.add(
+        FileMentionFile(
+          path: path,
+          content: m['content'] is String ? m['content'] as String : null,
+          lineCount: m['lineCount'] is int ? m['lineCount'] as int : null,
+          byteSize: m['byteSize'] is int ? m['byteSize'] as int : null,
+          skippedReason: m['skippedReason'] is String
+              ? m['skippedReason'] as String
+              : null,
+          image: m['image'] == true,
+        ),
+      );
+    }
+    return out;
+  }
+}
+
+/// The fileMention message the gateway emits right after a user message whose
+/// prompt carried @-tokens: a compact row per attached file under the bubble.
+class FileMentionItem extends Item {
+  final List<FileMentionFile> files;
+
+  const FileMentionItem({
+    required super.id,
+    required this.files,
+    super.messageKey,
+    super.raw,
+  });
+
+  @override
+  String get kind => 'fileMention';
+
+  @override
+  Map<String, Object?> normalized() => {
+    'kind': kind,
+    'id': id,
+    if (messageKey != null) 'messageKey': messageKey,
+    'files': [
+      for (final f in files)
+        {
+          'path': f.path,
+          if (f.lineCount != null) 'lineCount': f.lineCount,
+          if (f.byteSize != null) 'byteSize': f.byteSize,
+          if (f.skippedReason != null) 'skippedReason': f.skippedReason,
+          if (f.image) 'image': true,
+        },
+    ],
+  };
+}

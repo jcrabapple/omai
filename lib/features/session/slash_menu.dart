@@ -13,6 +13,7 @@ class SlashMenu extends StatelessWidget {
     required this.active,
     required this.onPick,
     required this.onHover,
+    this.maxHeight = 320,
   });
 
   final List<SlashGroup> groups;
@@ -20,61 +21,87 @@ class SlashMenu extends StatelessWidget {
   final void Function(SlashMatch match) onPick;
   final void Function(int index) onHover;
 
+  /// Tallest the menu may render. The composer sizes this from the space
+  /// above the keyboard so the menu never pushes the field off screen; the
+  /// list scrolls inside whatever it gets.
+  final double maxHeight;
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
     final children = <Widget>[];
     var i = 0;
     for (final g in groups) {
-      children.add(Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: OmpMetrics.s3, vertical: OmpMetrics.s1),
-        child: Text(g.label.toUpperCase(),
+      children.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: OmpMetrics.s3,
+            vertical: OmpMetrics.s1,
+          ),
+          child: Text(
+            g.label.toUpperCase(),
             style: TextStyle(
-                color: tokens.ink3,
-                fontSize: OmpMetrics.fsXs,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.5)),
-      ));
+              color: tokens.ink3,
+              fontSize: OmpMetrics.fsXs,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+      );
       for (final m in g.items) {
         final idx = i++;
-        children.add(InkResponse(
-          onTap: () => onPick(m),
-          onHover: (_) => onHover(idx),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(
-                horizontal: OmpMetrics.s3, vertical: OmpMetrics.s1),
-            color: idx == active ? tokens.press : null,
-            child: Row(
-              children: [
-                Text('/${m.command.name}',
+        children.add(
+          InkResponse(
+            onTap: () => onPick(m),
+            onHover: (_) => onHover(idx),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(
+                horizontal: OmpMetrics.s3,
+                vertical: OmpMetrics.s1,
+              ),
+              color: idx == active ? tokens.press : null,
+              child: Row(
+                children: [
+                  Text(
+                    '/${m.command.name}',
                     style: TextStyle(
-                        color: tokens.ink,
-                        fontSize: OmpMetrics.fsBase,
-                        fontFamily: 'monospace')),
-                if (m.command.inputHint != null) ...[
-                  const SizedBox(width: OmpMetrics.s3),
-                  Text(m.command.inputHint!,
+                      color: tokens.ink,
+                      fontSize: OmpMetrics.fsBase,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  if (m.command.inputHint != null) ...[
+                    const SizedBox(width: OmpMetrics.s3),
+                    Text(
+                      m.command.inputHint!,
                       style: TextStyle(
-                          color: tokens.ink3,
-                          fontSize: OmpMetrics.fsSm,
-                          fontFamily: 'monospace')),
-                ],
-                const Spacer(),
-                Flexible(
-                  child: Text(firstDescriptionLine(m.command),
+                        color: tokens.ink3,
+                        fontSize: OmpMetrics.fsSm,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
+                  Flexible(
+                    child: Text(
+                      firstDescriptionLine(m.command),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.right,
                       style: TextStyle(
-                          color: tokens.ink3, fontSize: OmpMetrics.fsSm)),
-                ),
-              ],
+                        color: tokens.ink3,
+                        fontSize: OmpMetrics.fsSm,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ));
+        );
       }
     }
     return Material(
@@ -82,7 +109,7 @@ class SlashMenu extends StatelessWidget {
       borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
       elevation: 4,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 320),
+        constraints: BoxConstraints(maxHeight: maxHeight),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

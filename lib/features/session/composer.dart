@@ -578,6 +578,24 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         ? 0
         : (_sel >= flat.length ? flat.length - 1 : _sel);
 
+    // The menus must fit in the space actually left above the keyboard.
+    // The Scaffold resizes the body around the keyboard and strips the
+    // bottom viewInset from this subtree's MediaQuery, so the honest source
+    // is the raw view metrics: screen height minus keyboard inset, status
+    // bar, app bar, and the composer's own chrome (field row, paddings).
+    // Capped at the design maximum, floored at about two rows; the list
+    // scrolls inside whatever it gets (device review: the fixed 320 cap
+    // overflowed the Column on a 384dp-wide phone with the keyboard up).
+    final view = View.of(context);
+    final dpr = view.devicePixelRatio;
+    final screen = view.physicalSize.height / dpr;
+    final keyboard = view.viewInsets.bottom / dpr;
+    final topInset = view.padding.top / dpr;
+    final menuMax = (screen - keyboard - topInset - kToolbarHeight - 120).clamp(
+      96.0,
+      320.0,
+    );
+
     return SafeArea(
       top: false,
       child: Padding(
@@ -598,6 +616,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                   entries: atList,
                   active: atActive,
                   note: atNote,
+                  maxHeight: menuMax,
                   onPick: (e) => e.isDir ? _drillAtDir(e) : _pickAtFile(e),
                   onHover: (i) => setState(() => _atSel = i),
                 ),
@@ -608,6 +627,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                 child: SlashMenu(
                   groups: groups,
                   active: selected,
+                  maxHeight: menuMax,
                   onPick: _pick,
                   onHover: (i) => setState(() => _sel = i),
                 ),

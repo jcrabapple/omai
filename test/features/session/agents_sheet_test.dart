@@ -1,7 +1,7 @@
 // Agents sheet widget tests. Same harness as
 // test/features/session/background_work_banner_test.dart (FakeSocket +
 // MockClient). Covers: the overflow menu item opens the sheet, the banner's
-// 'Show agents' button opens it, the empty state, live updates while the
+// 'Show helpers' button opens it, the empty state, live updates while the
 // sheet is open (subagent_progress frames), the per-agent transcript with
 // Load more paging, the transcript error state with retry, TalkBack row
 // labels, and the 360dp / 1.3 text scale no-overflow rule.
@@ -214,8 +214,8 @@ Future<void> _openViaMenu(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Session actions'));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
-  expect(find.text('Agents'), findsOneWidget, reason: 'menu item present');
-  await tester.tap(find.text('Agents'));
+  expect(find.text('Helpers'), findsOneWidget, reason: 'menu item present');
+  await tester.tap(find.text('Helpers'));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
 }
@@ -255,8 +255,8 @@ void main() {
 
     await _openViaMenu(tester);
 
-    expect(find.text('Agents'), findsWidgets);
-    expect(find.text('No background agents in this session.'), findsOneWidget);
+    expect(find.text('Helpers'), findsWidgets);
+    expect(find.text('No helpers in this session.'), findsOneWidget);
   });
 
   testWidgets('the overflow menu item Agents opens the sheet', (tester) async {
@@ -281,7 +281,7 @@ void main() {
     await _openViaMenu(tester);
 
     expect(find.text('explore'), findsOneWidget);
-    expect(find.text('No background agents in this session.'), findsNothing);
+    expect(find.text('No helpers in this session.'), findsNothing);
   });
 
   testWidgets("the banner's Show agents button opens the sheet", (
@@ -297,7 +297,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('banner-show-agents')));
     await _settle(tester);
 
-    expect(find.text('No background agents in this session.'), findsOneWidget);
+    expect(find.text('No helpers in this session.'), findsOneWidget);
   });
 
   testWidgets('rows update live while the sheet is open', (tester) async {
@@ -307,7 +307,7 @@ void main() {
     await _pumpReady(tester, container);
 
     await _openViaMenu(tester);
-    expect(find.text('No background agents in this session.'), findsOneWidget);
+    expect(find.text('No helpers in this session.'), findsOneWidget);
     final semantics = tester.ensureSemantics();
 
     hub.current.frame(5, {
@@ -535,7 +535,7 @@ void main() {
     await _settle(tester);
 
     // No id yet: the waiting state shows, no request went out.
-    expect(find.text('Waiting for the agent to start.'), findsOneWidget);
+    expect(find.text('Waiting for the helper to start.'), findsOneWidget);
     expect(gateway.transcriptRequests, isEmpty);
 
     // omp assigns the id: the roster re-keys the row to 'sa9' and the page

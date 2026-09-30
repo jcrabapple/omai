@@ -17,6 +17,7 @@ class AtMenu extends StatelessWidget {
     required this.note,
     required this.onPick,
     required this.onHover,
+    this.maxHeight = 320,
   });
 
   /// Already ranked and sliced by the caller (rankEntries(...).take(8)).
@@ -30,6 +31,11 @@ class AtMenu extends StatelessWidget {
 
   final void Function(FileIndexEntry entry) onPick;
   final void Function(int index) onHover;
+
+  /// Tallest the menu may render. The composer sizes this from the space
+  /// above the keyboard so the menu never pushes the field off screen; the
+  /// list scrolls inside whatever it gets.
+  final double maxHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +129,7 @@ class AtMenu extends StatelessWidget {
         borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
         elevation: 4,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 320),
+          constraints: BoxConstraints(maxHeight: maxHeight),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

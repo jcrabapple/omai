@@ -43,7 +43,7 @@ const _statusWord = {
 /// TalkBack label for one row: agent, status, current tool, the first line
 /// of the task and the metrics, in one stop.
 String rowLabel(SubagentRow row) {
-  final bits = <String>[row.agent.isEmpty ? 'Subagent' : row.agent];
+  final bits = <String>[row.agent.isEmpty ? 'Helper' : row.agent];
   bits.add(_statusWord[row.status]!);
   if (row.status == SubagentStatus.running && row.currentTool.isNotEmpty) {
     bits.add(row.currentTool);
@@ -80,7 +80,7 @@ class AgentsSheet extends ConsumerWidget {
             Padding(
               padding: const EdgeInsets.all(OmpMetrics.s3),
               child: Text(
-                'Agents',
+                'Helpers',
                 style: TextStyle(
                   color: tokens.ink,
                   fontSize: OmpMetrics.fsLg,
@@ -97,7 +97,7 @@ class AgentsSheet extends ConsumerWidget {
                   OmpMetrics.s4,
                 ),
                 child: Text(
-                  'No background agents in this session.',
+                  'No helpers in this session.',
                   key: const ValueKey('agents-empty'),
                   style: TextStyle(
                     color: tokens.ink3,
@@ -214,7 +214,7 @@ class _AgentRowTile extends StatelessWidget {
                       children: [
                         Flexible(
                           child: Text(
-                            row.agent.isEmpty ? 'Subagent' : row.agent,
+                            row.agent.isEmpty ? 'Helper' : row.agent,
                             style: TextStyle(
                               color: tokens.ink,
                               fontSize: OmpMetrics.fsBase,
@@ -503,7 +503,7 @@ class _SubagentTranscriptPageState
     final row = ref.watch(
       subagentsStoreProvider.select((rows) => rows.where(_matches).firstOrNull),
     );
-    final title = (row?.agent.isNotEmpty ?? false) ? row!.agent : 'Subagent';
+    final title = (row?.agent.isNotEmpty ?? false) ? row!.agent : 'Helper';
     return Scaffold(
       backgroundColor: tokens.canvas,
       appBar: AppBar(
@@ -557,7 +557,7 @@ class _SubagentTranscriptPageState
         child: Text(
           row?.id != null
               ? 'No messages yet'
-              : 'Waiting for the agent to start.',
+              : 'Waiting for the helper to start.',
           style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsSm),
         ),
       );

@@ -1,58 +1,18 @@
-// Copy, inspect and retry for one message. Ported from
-// web/src/components/items/MessageActions.svelte (long-press path; the hover
-// toolbar and bottom sheet are web-only).
+// Copy, fork, inspect and select for one message. Ported from
+// web/src/components/items/MessageActions.svelte.
 //
-// Review #6: the text's SelectionArea owns the long press (the Android
-// standard: long-press selects a word and shows the selection toolbar). The
-// actions ride inside that toolbar via [MessageActionsScope.selectionMenu],
-// and a 48dp overflow button opens the same menu without selecting. There is
-// deliberately no raw-pointer long-press timer here: it raced the selection
-// recognizer and popped the menu during slow drags.
+// Device review: on a phone the old SelectionArea toolbar hid the actions in
+// the Android overflow, so a long-press anywhere on the bubble now opens the
+// same menu the overflow button opens (the standard chat-app pattern), with
+// haptic feedback. 'Select text' opens a bottom sheet where the message is a
+// SelectableText, so a portion can still be copied. There is deliberately no
+// SelectionArea under the bubble: a long-press recognizer with no selection
+// recognizer underneath does not race (the earlier raw-pointer timer did).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Menu/toolbar actions for the message that built the scope. Found from a
-/// SelectionArea's contextMenuBuilder through the enclosing scope.
-class MessageActionsScope extends InheritedWidget {
-  const MessageActionsScope({
-    super.key,
-    required this.text,
-    required this.label,
-    required this.customItems,
-    required super.child,
-  });
-
-  final String text;
-  final String label;
-
-  /// Inspect / Retry turn as selection-toolbar items. [dismiss] hides the
-  /// selection toolbar first so the action opens on a clean screen.
-  final List<ContextMenuButtonItem> Function(void Function() dismiss)
-  customItems;
-
-  static MessageActionsScope? maybeOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<MessageActionsScope>();
-
-  /// The SelectionArea context menu: the default selectable items (Copy on a
-  /// non-empty selection, Select all) plus this message's own actions.
-  Widget selectionMenu(BuildContext context, SelectableRegionState region) {
-    return AdaptiveTextSelectionToolbar.buttonItems(
-      anchors: region.contextMenuAnchors,
-      buttonItems: [
-        ...region.contextMenuButtonItems,
-        ...customItems(region.hideToolbar),
-      ],
-    );
-  }
-
-  @override
-  bool updateShouldNotify(MessageActionsScope oldWidget) =>
-      oldWidget.text != text || oldWidget.label != label;
-}
-
 /// Wraps one message and offers Copy (of [text]), Inspect ([raw]) and an
-/// optional [onRetry] action in the selection toolbar and in the overflow
-/// menu opened by the more button.
+/// optional [onRetry] action in the long-press and overflow menus.
 class MessageActions extends StatefulWidget {
   final String text;
   final Object? raw;
@@ -90,34 +50,6 @@ class MessageActions extends StatefulWidget {
 }
 
 class _MessageActionsState extends State<MessageActions> {
-  /// Fork / Inspect / Retry turn for the selection toolbar.
-  List<ContextMenuButtonItem> _toolbarItems(void Function() dismiss) => [
-    if (widget.onFork != null)
-      ContextMenuButtonItem(
-        label: 'Fork from here',
-        onPressed: () {
-          dismiss();
-          widget.onFork!.call();
-        },
-      ),
-    if (widget.onInspect != null)
-      ContextMenuButtonItem(
-        label: 'Inspect',
-        onPressed: () {
-          dismiss();
-          widget.onInspect?.call(widget.raw);
-        },
-      ),
-    if (widget.onRetry != null)
-      ContextMenuButtonItem(
-        label: 'Retry turn',
-        onPressed: () {
-          dismiss();
-          widget.onRetry!.call();
-        },
-      ),
-  ];
-
   Future<void> openMenu(BuildContext context, {Offset? at}) async {
     if (widget.disabled) return;
     // Review #16: no overlay (a sheet transition, teardown) means no menu.
@@ -155,6 +87,10 @@ class _MessageActionsState extends State<MessageActions> {
             value: 'retry',
             child: Text('Retry turn'),
           ),
+        const PopupMenuItem<String>(
+          value: 'select',
+          child: Text('Select text'),
+        ),
       ],
     );
     if (choice == null || !context.mounted) return;
@@ -169,7 +105,33 @@ class _MessageActionsState extends State<MessageActions> {
       widget.onInspect?.call(widget.raw);
     } else if (choice == 'retry') {
       widget.onRetry?.call();
+    } else if (choice == 'select') {
+      await _showSelectTextSheet(context);
     }
+  }
+
+  /// The full message in a SelectableText, for selecting a portion without
+  /// the long-press gesture race the SelectionArea under the bubble caused.
+  Future<void> _showSelectTextSheet(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.8,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: SelectableText(
+              widget.text,
+              style: const TextStyle(fontFamily: 'monospace'),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -178,40 +140,46 @@ class _MessageActionsState extends State<MessageActions> {
       label: widget.label,
       onLongPressHint: 'Message actions',
       onLongPress: widget.disabled ? null : () => openMenu(context),
-      child: MessageActionsScope(
-        text: widget.text,
-        label: widget.label,
-        customItems: _toolbarItems,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          // Center, not stretch: short bubbles must keep hugging their
-          // content (the overflow button aligns itself to the right).
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            widget.child,
-            // The explicit no-select affordance: same menu, no selection.
-            if (!widget.disabled)
-              Align(
-                alignment: Alignment.centerRight,
-                child: IconButton(
-                  tooltip: 'Message actions',
-                  // Not a token: MessageActions also renders in plain
-                  // contexts (tests, sheets) whose theme has no OmpTokens.
-                  icon: Icon(
-                    Icons.more_vert,
-                    size: 20,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: OmpItemStyle.hit,
-                    minHeight: OmpItemStyle.hit,
-                  ),
-                  onPressed: () => openMenu(context),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        // Center, not stretch: short bubbles must keep hugging their
+        // content (the overflow button aligns itself to the right).
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Long-press anywhere on the bubble opens the menu (with haptics);
+          // opaque so the padding of an empty or short bubble counts too.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPress: widget.disabled
+                ? null
+                : () {
+                    HapticFeedback.mediumImpact();
+                    openMenu(context);
+                  },
+            child: widget.child,
+          ),
+          // The explicit no-select affordance: same menu, no selection.
+          if (!widget.disabled)
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                tooltip: 'Message actions',
+                // Not a token: MessageActions also renders in plain
+                // contexts (tests, sheets) whose theme has no OmpTokens.
+                icon: Icon(
+                  Icons.more_vert,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                  minWidth: OmpItemStyle.hit,
+                  minHeight: OmpItemStyle.hit,
+                ),
+                onPressed: () => openMenu(context),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }

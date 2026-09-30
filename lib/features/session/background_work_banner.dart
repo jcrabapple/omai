@@ -2,7 +2,7 @@
 // subagents, async bash) that will wake the session on their own when they
 // finish, so pressing Stop on the turn was not enough. Shown above the
 // composer while the session is idle; the 'Stop session' button runs the
-// shared stop-session flow (DELETE the gateway session) and 'Show agents'
+// shared stop-session flow (DELETE the gateway session) and 'Show helpers'
 // opens the live subagent roster.
 import 'package:flutter/material.dart';
 
@@ -73,7 +73,7 @@ class BackgroundWorkBanner extends StatelessWidget {
                     TextButton(
                       key: const ValueKey('banner-show-agents'),
                       onPressed: onShowAgents,
-                      child: const Text('Show agents'),
+                      child: const Text('Show helpers'),
                     ),
                   TextButton(
                     onPressed: onStop,

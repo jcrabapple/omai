@@ -63,26 +63,12 @@ class UserBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // No SelectionArea: long-press on the bubble belongs to the action
+          // menu; 'Select text' in the menu opens a selectable sheet.
           if (item.text.isNotEmpty)
-            Builder(
-              builder: (scopeContext) {
-                // The scope is captured from a context BELOW it: the
-                // selection toolbar is built in the root overlay, outside
-                // this subtree (review #6).
-                final scope = MessageActionsScope.maybeOf(scopeContext);
-                return SelectionArea(
-                  contextMenuBuilder: (context, region) =>
-                      scope?.selectionMenu(context, region) ??
-                      AdaptiveTextSelectionToolbar.buttonItems(
-                        anchors: region.contextMenuAnchors,
-                        buttonItems: region.contextMenuButtonItems,
-                      ),
-                  child: Text(
-                    item.text,
-                    style: textTheme.bodyMedium?.copyWith(color: cs.onSurface),
-                  ),
-                );
-              },
+            Text(
+              item.text,
+              style: textTheme.bodyMedium?.copyWith(color: cs.onSurface),
             ),
           if (item.images > 0)
             Padding(
@@ -126,6 +112,10 @@ class UserBubble extends StatelessWidget {
                     text: item.text,
                     raw: item.raw,
                     label: 'Your message',
+                    // A pending bubble has no actions yet. A failed one keeps
+                    // Copy / Select text so its text can be rescued; Fork is
+                    // already withheld for it (forkable()).
+                    disabled: item.pending,
                     onInspect: onInspect,
                     onFork: onFork,
                     child: bubble,

@@ -149,29 +149,16 @@ class _AssistantMessageState extends State<AssistantMessage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Builder(
-            builder: (scopeContext) {
-              final scope = MessageActionsScope.maybeOf(scopeContext);
-              return SelectionArea(
-                // Review #6: long-press selects text AND offers the actions in
-                // the selection toolbar (Inspect, Retry turn beside Copy).
-                contextMenuBuilder: (context, region) =>
-                    scope?.selectionMenu(context, region) ??
-                    AdaptiveTextSelectionToolbar.buttonItems(
-                      anchors: region.contextMenuAnchors,
-                      buttonItems: region.contextMenuButtonItems,
-                    ),
-                child: MarkdownBody(
-                  data: _throttledText(),
-                  selectable: false,
-                  styleSheet: _sheetFor(context, t),
-                  onTapLink: (text, href, title) {
-                    // TODO(D2): open links in an in-app viewer. Deliberately a
-                    // no-op so taps never crash before that lands.
-                    widget.onLinkTap?.call(href ?? text);
-                  },
-                ),
-              );
+          // No SelectionArea: long-press belongs to the action menu;
+          // 'Select text' in the menu opens a selectable sheet.
+          MarkdownBody(
+            data: _throttledText(),
+            selectable: false,
+            styleSheet: _sheetFor(context, t),
+            onTapLink: (text, href, title) {
+              // TODO(D2): open links in an in-app viewer. Deliberately a
+              // no-op so taps never crash before that lands.
+              widget.onLinkTap?.call(href ?? text);
             },
           ),
           if (stopped)

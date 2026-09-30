@@ -425,7 +425,26 @@ void _applyMessage(
       _applyToolResult(d, m, ctx);
     case 'custom':
       _applyCustom(d, m, ctx, messageId: messageId, fallback: fallback);
+    case 'fileMention':
+      _applyFileMention(d, m, messageId: messageId, fallback: fallback);
   }
+}
+
+/// The fileMention message right after a user prompt: a compact row per
+/// attached file. Defensively parsed: a malformed payload yields an item with
+/// whatever files could be read, never a crash.
+void _applyFileMention(
+  _Work d,
+  Map<String, Object?> m, {
+  String? messageId,
+  required String fallback,
+}) {
+  final key = _keyOf(m, messageId, fallback);
+  if (_findKeyed(d, 'fileMention', key) >= 0) return;
+  final files = FileMentionFile.listFrom(m['files']);
+  d.items.add(
+    FileMentionItem(id: 'fm:$key', files: files, messageKey: key, raw: m),
+  );
 }
 
 void _applyUser(

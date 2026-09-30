@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../transcript/items.dart';
 import 'items/assistant_message.dart';
 import 'items/command_card.dart';
+import 'items/file_mention.dart';
 import 'items/notice_line.dart';
 import 'items/skill_chip.dart';
 import 'items/thinking_row.dart';
@@ -73,6 +74,7 @@ class TranscriptItemView extends StatelessWidget {
       );
     }
     if (it is ThinkingItem) return ThinkingRow(item: it);
+    if (it is FileMentionItem) return FileMentionRow(item: it);
     if (it is ToolItem) {
       return ToolGroup(tools: toolRun ?? [it], onInspect: callbacks.onInspect);
     }
