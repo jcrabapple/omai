@@ -239,21 +239,34 @@ void main() {
     expect(allText(), contains('abc'));
   });
 
-  testWidgets('tapping a thinking chip calls setThinking with that level', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(900, 1600);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
-    final gateway = FakeGateway(info: infoJson());
-    final container = _container(gateway: gateway, hub: SocketHub());
-    await _pumpSheet(tester, container);
+  testWidgets(
+    'picking from the thinking dropdown calls setThinking with that level',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final gateway = FakeGateway(info: infoJson());
+      final container = _container(gateway: gateway, hub: SocketHub());
+      await _pumpSheet(tester, container);
 
-    await tester.tap(find.text('medium'));
-    await tester.pump();
-    await tester.pump();
-    expect(gateway.bodies['/api/sessions/abc/thinking'], {'level': 'medium'});
-  });
+      // A dropdown showing the current level ('low' in infoJson).
+      final field = find.byType(DropdownButtonFormField<String>);
+      expect(field, findsOneWidget);
+      expect(
+        find.descendant(of: field, matching: find.text('low')),
+        findsOneWidget,
+      );
+      await tester.ensureVisible(field);
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      // The full API.md list, including the two the chips used to miss.
+      expect(find.text('xhigh').last, findsOneWidget);
+      expect(find.text('max').last, findsOneWidget);
+      await tester.tap(find.text('medium').last);
+      await tester.pumpAndSettle();
+      expect(gateway.bodies['/api/sessions/abc/thinking'], {'level': 'medium'});
+    },
+  );
 
   testWidgets('Change opens the model picker and a pick calls setModel', (
     tester,

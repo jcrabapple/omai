@@ -12,9 +12,7 @@ import '../../format.dart';
 import '../../state/session_controller.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/model_picker.dart';
-
-/// The thinking levels the gateway accepts, off first (docs/API.md).
-const thinkingLevels = <String>['off', 'minimal', 'low', 'medium', 'high'];
+import '../../widgets/thinking_dropdown.dart';
 
 Future<void> showSessionInfoSheet(
   BuildContext context, {
@@ -152,18 +150,11 @@ class SessionInfoSheet extends ConsumerWidget {
                       padding: const EdgeInsets.symmetric(
                         vertical: OmpMetrics.s2,
                       ),
-                      child: Wrap(
-                        spacing: OmpMetrics.s2,
-                        runSpacing: OmpMetrics.s2,
-                        children: [
-                          for (final level in thinkingLevels)
-                            _thinkingChip(
-                              context,
-                              ref,
-                              level,
-                              info.thinkingLevel ?? 'off',
-                            ),
-                        ],
+                      child: ThinkingDropdown(
+                        value: info.thinkingLevel,
+                        onChanged: (level) => ref
+                            .read(sessionControllerProvider(gwId).notifier)
+                            .setThinking(level),
                       ),
                     ),
                     _row(
@@ -275,44 +266,6 @@ class SessionInfoSheet extends ConsumerWidget {
             .read(sessionControllerProvider(gwId).notifier)
             .setModel(picked.provider, picked.id);
       },
-    );
-  }
-
-  Widget _thinkingChip(
-    BuildContext context,
-    WidgetRef ref,
-    String level,
-    String current,
-  ) {
-    final tokens = Theme.of(context).extension<OmpTokens>()!;
-    final active = current == level;
-    return Semantics(
-      label: 'Thinking level $level',
-      button: true,
-      child: InkWell(
-        onTap: () {
-          ref.read(sessionControllerProvider(gwId).notifier).setThinking(level);
-        },
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
-          padding: const EdgeInsets.symmetric(horizontal: OmpMetrics.s3),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: active ? tokens.accent : tokens.line),
-            color: active ? tokens.accent.withValues(alpha: 0.15) : null,
-          ),
-          child: Text(
-            level,
-            style: TextStyle(
-              color: active ? tokens.accent : tokens.ink2,
-              fontSize: OmpMetrics.fsSm,
-              fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-            ),
-          ),
-        ),
-      ),
     );
   }
 

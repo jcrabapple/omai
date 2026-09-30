@@ -25,9 +25,11 @@ import 'package:ohmypi/theme/presets.dart';
 
 import '../../stream/fakes.dart';
 
-http.Response _json(Object? body, {int status = 200}) =>
-    http.Response(jsonEncode(body), status,
-        headers: {'content-type': 'application/json'});
+http.Response _json(Object? body, {int status = 200}) => http.Response(
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 class _FixedTokenStore implements TokenStore {
   @override
@@ -54,31 +56,29 @@ class FakeGateway {
   final List<Object?> bodies = [];
 
   http.Client client() => MockClient((req) async {
-        if (req.method == 'POST' && req.url.path == '/api/sessions') {
-          bodies.add(jsonDecode(req.body));
-          if (createStatus != 200) {
-            return _json(createBody ?? {'error': 'nope'}, status: createStatus);
-          }
-          return _json(createBody ??
-              {
-                'gwId': 'gw-new',
-                'cwd': '/work/prompter',
-                'approvalMode': 'yolo',
-              });
-        }
-        if (req.url.path == '/api/sessions') {
-          return _json({
-            'live': [
-              {'gwId': 'live-1', 'cwd': '/work/prompter'}
-            ],
-            'saved': const [],
-          });
-        }
-        if (req.url.path.endsWith('/messages')) {
-          return _json({'messages': []});
-        }
-        return _json({'live': const [], 'saved': const []});
+    if (req.method == 'POST' && req.url.path == '/api/sessions') {
+      bodies.add(jsonDecode(req.body));
+      if (createStatus != 200) {
+        return _json(createBody ?? {'error': 'nope'}, status: createStatus);
+      }
+      return _json(
+        createBody ??
+            {'gwId': 'gw-new', 'cwd': '/work/prompter', 'approvalMode': 'yolo'},
+      );
+    }
+    if (req.url.path == '/api/sessions') {
+      return _json({
+        'live': [
+          {'gwId': 'live-1', 'cwd': '/work/prompter'},
+        ],
+        'saved': const [],
       });
+    }
+    if (req.url.path.endsWith('/messages')) {
+      return _json({'messages': []});
+    }
+    return _json({'live': const [], 'saved': const []});
+  });
 }
 
 class _MemoryDraftKv implements DraftKv {
@@ -101,65 +101,94 @@ class _MemoryKv implements ReviewedKv {
 
 ProviderContainer _container(FakeGateway gateway) {
   final env = SessionEnv(
-      client: GatewayClient(
-          baseUrl: 'https://g', token: 'tok', client: gateway.client()),
+    client: GatewayClient(
       baseUrl: 'https://g',
       token: 'tok',
-      socketFactory: (url, headers) async {
-        final sock = FakeSocket(url, headers);
-        return sock;
-      },
-      scheduler: const SystemScheduler());
-  final container = ProviderContainer(overrides: [
-    reviewedKvProvider.overrideWithValue(_MemoryKv()),
-    draftKvProvider.overrideWithValue(_MemoryDraftKv()),
-    connectionPrefsProvider.overrideWithValue(MemoryPrefs(const [
-      ConnectionRecord(id: 'c1', url: 'https://g', label: 'G')
-    ])),
-    tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
-    sessionsPollIntervalProvider
-        .overrideWithValue(const Duration(hours: 1)),
-    gatewayClientFactoryProvider.overrideWith((ref) => (baseUrl, token) =>
-        GatewayClient(baseUrl: baseUrl, token: token,
-            client: gateway.client())),
-    sessionEnvProvider.overrideWith((ref) async => env),
-  ]);
+      client: gateway.client(),
+    ),
+    baseUrl: 'https://g',
+    token: 'tok',
+    socketFactory: (url, headers) async {
+      final sock = FakeSocket(url, headers);
+      return sock;
+    },
+    scheduler: const SystemScheduler(),
+  );
+  final container = ProviderContainer(
+    overrides: [
+      reviewedKvProvider.overrideWithValue(_MemoryKv()),
+      draftKvProvider.overrideWithValue(_MemoryDraftKv()),
+      connectionPrefsProvider.overrideWithValue(
+        MemoryPrefs(const [
+          ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
+        ]),
+      ),
+      tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
+      sessionsPollIntervalProvider.overrideWithValue(const Duration(hours: 1)),
+      gatewayClientFactoryProvider.overrideWith(
+        (ref) =>
+            (baseUrl, token) => GatewayClient(
+              baseUrl: baseUrl,
+              token: token,
+              client: gateway.client(),
+            ),
+      ),
+      sessionEnvProvider.overrideWith((ref) async => env),
+    ],
+  );
   container.read(connectionNotifierProvider.notifier).state = ConnectionState(
-      connections:
-          const [ConnectionRecord(id: 'c1', url: 'https://g', label: 'G')],
-      activeId: 'c1');
+    connections: const [
+      ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
+    ],
+    activeId: 'c1',
+  );
   return container;
 }
 
-Future<void> _pump(WidgetTester tester, ProviderContainer container,
-    {ValueChanged<Object>? onCreated}) async {
+Future<void> _pump(
+  WidgetTester tester,
+  ProviderContainer container, {
+  ValueChanged<Object>? onCreated,
+}) async {
   // A tall surface: the sheet is scrollable and Start must be on-screen.
   tester.view.physicalSize = const Size(800, 2000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(UncontrolledProviderScope(
-    container: container,
-    child: MaterialApp(
-      theme: OmpTheme.data(OmpPreset.terminal),
-      navigatorObservers: [ompRouteObserver],
-      home: Consumer(builder: (context, ref, _) => Scaffold(
-        body: const SizedBox.shrink(),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () => showNewSessionSheet(context, ref,
-              onCreated: (info) {
-            if (onCreated != null) {
-              onCreated(info);
-              return;
-            }
-            // Mirror the sessions screen: open the new session.
-            ref.read(sessionsStoreProvider.notifier).setOpenSession(info.gwId);
-            Navigator.of(context).push(MaterialPageRoute<void>(
-                builder: (_) => SessionScreen(gwId: info.gwId)));
-          }),
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        theme: OmpTheme.data(OmpPreset.terminal),
+        navigatorObservers: [ompRouteObserver],
+        home: Consumer(
+          builder: (context, ref, _) => Scaffold(
+            body: const SizedBox.shrink(),
+            floatingActionButton: FloatingActionButton(
+              onPressed: () => showNewSessionSheet(
+                context,
+                ref,
+                onCreated: (info) {
+                  if (onCreated != null) {
+                    onCreated(info);
+                    return;
+                  }
+                  // Mirror the sessions screen: open the new session.
+                  ref
+                      .read(sessionsStoreProvider.notifier)
+                      .setOpenSession(info.gwId);
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => SessionScreen(gwId: info.gwId),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
         ),
-      )),
+      ),
     ),
-  ));
+  );
   // Let the sessions store settle so the recent-cwd chips are there.
   await tester.pump();
   await tester.pump();
@@ -196,15 +225,15 @@ void main() {
     expect(find.widgetWithText(TextField, '/work/prompter'), findsOneWidget);
   });
 
-  testWidgets('create posts the API.md body and opens the new session',
-      (tester) async {
+  testWidgets('create posts the API.md body and opens the new session', (
+    tester,
+  ) async {
     final gateway = FakeGateway();
     final container = _container(gateway);
     addTearDown(container.dispose);
     await _pump(tester, container);
 
-    await tester.enterText(
-        find.byType(TextField).first, '/work/newproj');
+    await tester.enterText(find.byType(TextField).first, '/work/newproj');
     // Pick a non-default approval mode to prove the body carries it.
     await tester.tap(find.text('Always ask'));
     await tester.tap(find.text('Start'));
@@ -219,15 +248,18 @@ void main() {
     expect(find.byType(SessionScreen), findsOneWidget);
     // The session screen opened with the new gateway id.
     expect(
-        tester.widget<SessionScreen>(find.byType(SessionScreen)).gwId,
-        'gw-new');
+      tester.widget<SessionScreen>(find.byType(SessionScreen)).gwId,
+      'gw-new',
+    );
   });
 
-  testWidgets('a 429 session cap shows the gateway message inline',
-      (tester) async {
+  testWidgets('a 429 session cap shows the gateway message inline', (
+    tester,
+  ) async {
     final gateway = FakeGateway(
-        createStatus: 429,
-        createBody: {'error': 'session limit reached (8); stop one first'});
+      createStatus: 429,
+      createBody: {'error': 'session limit reached (8); stop one first'},
+    );
     final container = _container(gateway);
     addTearDown(container.dispose);
     await _pump(tester, container);
@@ -237,27 +269,67 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('session limit reached (8); stop one first'),
-        findsOneWidget);
+    expect(
+      find.text('session limit reached (8); stop one first'),
+      findsOneWidget,
+    );
     expect(find.byType(SessionScreen), findsNothing);
     // The sheet stays open, so the user can go stop one and retry.
     expect(find.text('New session'), findsOneWidget);
   });
 
-  testWidgets('thinking chips are at least 48dp tall (touch target)',
-      (tester) async {
+  testWidgets(
+    'thinking is a dropdown; the picked level goes in the create body',
+    (tester) async {
+      final gateway = FakeGateway();
+      final container = _container(gateway);
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+
+      // One field, not a row of chips.
+      expect(find.text('medium'), findsNothing);
+      final field = find.byType(DropdownButtonFormField<String>);
+      expect(field, findsOneWidget);
+      expect(
+        tester.getSize(field).height,
+        greaterThanOrEqualTo(48.0),
+        reason: 'the dropdown must meet the 48dp hit target',
+      );
+
+      await tester.ensureVisible(field);
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      for (final level in ['off', 'minimal', 'low', 'high', 'xhigh', 'max']) {
+        expect(find.text(level).last, findsOneWidget);
+      }
+      await tester.tap(find.text('xhigh').last);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField).first, '/work/newproj');
+      await tester.tap(find.text('Start'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect((gateway.bodies.single as Map)['thinking'], 'xhigh');
+    },
+  );
+
+  testWidgets('leaving thinking on Default omits it from the create body', (
+    tester,
+  ) async {
     final gateway = FakeGateway();
     final container = _container(gateway);
     addTearDown(container.dispose);
     await _pump(tester, container);
 
-    final chip = tester.getSize(
-      find.ancestor(
-        of: find.text('medium'),
-        matching: find.byType(InkWell),
-      ).first,
-    );
-    expect(chip.height, greaterThanOrEqualTo(48.0),
-        reason: 'thinking-level chips must meet the 48dp hit target');
+    expect(find.text('Default'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, '/work/newproj');
+    await tester.tap(find.text('Start'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect((gateway.bodies.single as Map).containsKey('thinking'), isFalse);
   });
 }

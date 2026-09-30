@@ -15,14 +15,13 @@ import '../../state/session_controller.dart';
 import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/model_picker.dart';
+import '../../widgets/thinking_dropdown.dart';
+
 import 'dart:async';
 
 /// Web `DEFAULT_CWD`: where a session starts when the field is left at the
 /// placeholder. Kept as a const so tests can pin it.
 const defaultCwd = '~/projects';
-
-/// Thinking levels from API.md (`POST /sessions/{id}/thinking`), '' = default.
-const thinkingLevels = ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 /// Approval modes and their hints, ported from web/src/lib/composer/modes.ts.
 const approvalModes = [
@@ -46,7 +45,10 @@ final lastCwdProvider = NotifierProvider<LastCwd, String>(LastCwd.new);
 List<String> recentCwds(List<SessionInfo> live, List<SavedSession> saved) {
   final seen = <String>{};
   final out = <String>[];
-  for (final cwd in [...live.map((s) => s.cwd), ...saved.map((s) => s.displayCwd)]) {
+  for (final cwd in [
+    ...live.map((s) => s.cwd),
+    ...saved.map((s) => s.displayCwd),
+  ]) {
     if (cwd.isEmpty || !seen.add(cwd)) continue;
     out.add(cwd);
   }
@@ -69,18 +71,25 @@ Future<void> showNewSessionSheet(
     // slides under the status bar (edge-to-edge is on by default).
     useSafeArea: true,
     builder: (sheetContext) => Padding(
-      padding:
-          EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+      ),
       child: SingleChildScrollView(
         child: NewSessionSheet(
-            onCreated: onCreated, initialPrompt: initialPrompt),
+          onCreated: onCreated,
+          initialPrompt: initialPrompt,
+        ),
       ),
     ),
   );
 }
 
 class NewSessionSheet extends ConsumerStatefulWidget {
-  const NewSessionSheet({super.key, required this.onCreated, this.initialPrompt});
+  const NewSessionSheet({
+    super.key,
+    required this.onCreated,
+    this.initialPrompt,
+  });
 
   final ValueChanged<SessionInfo> onCreated;
 
@@ -137,8 +146,7 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
       });
       return;
     }
-    final client =
-        ref.read(gatewayClientFactoryProvider)(active.url, token);
+    final client = ref.read(gatewayClientFactoryProvider)(active.url, token);
     try {
       final info = await client.startSession(
         cwd: dir,
@@ -155,9 +163,9 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
       // Share intent: the shared text becomes the session's first prompt.
       final prompt = widget.initialPrompt?.trim() ?? '';
       if (prompt.isNotEmpty) {
-        unawaited(ref
-            .read(sessionControllerProvider(info.gwId).notifier)
-            .send(prompt));
+        unawaited(
+          ref.read(sessionControllerProvider(info.gwId).notifier).send(prompt),
+        );
       }
     } on GatewayClientError catch (e) {
       if (!mounted) return;
@@ -191,15 +199,19 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('New session',
-                style: TextStyle(
-                    color: tokens.ink,
-                    fontSize: OmpMetrics.fsLg,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              'New session',
+              style: TextStyle(
+                color: tokens.ink,
+                fontSize: OmpMetrics.fsLg,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: OmpMetrics.s4),
-            Text('Folder',
-                style:
-                    TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm)),
+            Text(
+              'Folder',
+              style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm),
+            ),
             const SizedBox(height: OmpMetrics.s1),
             TextField(
               controller: _cwd,
@@ -209,7 +221,8 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
                 hintText: defaultCwd,
                 isDense: true,
                 border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(OmpMetrics.radiusMd)),
+                  borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
+                ),
               ),
             ),
             if (suggestions.isNotEmpty) ...[
@@ -232,9 +245,10 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
               ),
             ],
             const SizedBox(height: OmpMetrics.s4),
-            Text('Model',
-                style:
-                    TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm)),
+            Text(
+              'Model',
+              style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm),
+            ),
             const SizedBox(height: OmpMetrics.s1),
             SizedBox(
               width: double.infinity,
@@ -249,39 +263,35 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(_model?.name ?? 'Default model',
-                          style: TextStyle(
-                              color: _model == null ? tokens.ink3 : tokens.ink,
-                              fontSize: OmpMetrics.fsBase)),
+                      child: Text(
+                        _model?.name ?? 'Default model',
+                        style: TextStyle(
+                          color: _model == null ? tokens.ink3 : tokens.ink,
+                          fontSize: OmpMetrics.fsBase,
+                        ),
+                      ),
                     ),
-                    Icon(Icons.expand_more,
-                        size: 16, color: tokens.ink3),
+                    Icon(Icons.expand_more, size: 16, color: tokens.ink3),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: OmpMetrics.s4),
-            Text('Thinking',
-                style:
-                    TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm)),
+            Text(
+              'Thinking',
+              style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm),
+            ),
             const SizedBox(height: OmpMetrics.s1),
-            Wrap(
-              spacing: OmpMetrics.s2,
-              runSpacing: OmpMetrics.s1,
-              children: [
-                for (final level in thinkingLevels)
-                  _ChoiceChip(
-                    tokens: tokens,
-                    label: level.isEmpty ? 'Default' : level,
-                    on: _thinking == level,
-                    onTap: () => setState(() => _thinking = level),
-                  ),
-              ],
+            ThinkingDropdown(
+              value: _thinking,
+              defaultLabel: 'Default',
+              onChanged: (level) => setState(() => _thinking = level),
             ),
             const SizedBox(height: OmpMetrics.s4),
-            Text('Approval',
-                style:
-                    TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm)),
+            Text(
+              'Approval',
+              style: TextStyle(color: tokens.ink2, fontSize: OmpMetrics.fsSm),
+            ),
             const SizedBox(height: OmpMetrics.s1),
             for (final mode in approvalModes)
               Semantics(
@@ -290,34 +300,39 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
                 label: '${mode.label}. ${mode.hint}',
                 child: InkWell(
                   onTap: () => setState(() => _approval = mode.id),
-                  borderRadius:
-                      BorderRadius.circular(OmpMetrics.radiusMd),
+                  borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
                   child: Container(
                     width: double.infinity,
                     constraints: const BoxConstraints(minHeight: 48),
-                    margin: const EdgeInsets.symmetric(
-                        vertical: OmpMetrics.s1),
+                    margin: const EdgeInsets.symmetric(vertical: OmpMetrics.s1),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: OmpMetrics.s3, vertical: OmpMetrics.s2),
+                      horizontal: OmpMetrics.s3,
+                      vertical: OmpMetrics.s2,
+                    ),
                     decoration: BoxDecoration(
                       color: _approval == mode.id
                           ? tokens.accentSoft
                           : tokens.inset,
-                      borderRadius:
-                          BorderRadius.circular(OmpMetrics.radiusMd),
+                      borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(mode.label,
-                            style: TextStyle(
-                                color: tokens.ink,
-                                fontSize: OmpMetrics.fsBase,
-                                fontWeight: FontWeight.w600)),
-                        Text(mode.hint,
-                            style: TextStyle(
-                                color: tokens.ink3,
-                                fontSize: OmpMetrics.fsSm)),
+                        Text(
+                          mode.label,
+                          style: TextStyle(
+                            color: tokens.ink,
+                            fontSize: OmpMetrics.fsBase,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          mode.hint,
+                          style: TextStyle(
+                            color: tokens.ink3,
+                            fontSize: OmpMetrics.fsSm,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -327,9 +342,13 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
               const SizedBox(height: OmpMetrics.s2),
               Semantics(
                 liveRegion: true,
-                child: Text(_error!,
-                    style:
-                        TextStyle(color: tokens.err, fontSize: OmpMetrics.fsSm)),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    color: tokens.err,
+                    fontSize: OmpMetrics.fsSm,
+                  ),
+                ),
               ),
             ],
             const SizedBox(height: OmpMetrics.s4),
@@ -337,7 +356,9 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 TextButton(
-                  onPressed: _starting ? null : () => Navigator.of(context).pop(),
+                  onPressed: _starting
+                      ? null
+                      : () => Navigator.of(context).pop(),
                   child: const Text('Cancel'),
                 ),
                 const SizedBox(width: OmpMetrics.s2),
@@ -348,10 +369,13 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
                     children: [
                       if (_starting) ...[
                         SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: tokens.accentInk)),
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: tokens.accentInk,
+                          ),
+                        ),
                         const SizedBox(width: OmpMetrics.s2),
                       ],
                       const Text('Start'),
@@ -361,46 +385,6 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ChoiceChip extends StatelessWidget {
-  const _ChoiceChip({
-    required this.tokens,
-    required this.label,
-    required this.on,
-    required this.onTap,
-  });
-
-  final OmpTokens tokens;
-  final String label;
-  final bool on;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: on,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
-          padding:
-              const EdgeInsets.symmetric(horizontal: OmpMetrics.s3),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: on ? tokens.accentSoft : tokens.inset,
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Text(label,
-              style: TextStyle(
-                  color: on ? tokens.ink : tokens.ink2,
-                  fontSize: OmpMetrics.fsSm)),
         ),
       ),
     );
