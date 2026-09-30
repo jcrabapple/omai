@@ -6,6 +6,8 @@
 // never end up stuck at the top; scrolling up to read is respected and a
 // jump pill offers the way back down.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,9 +18,11 @@ import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
 import '../../transcript/items.dart';
 import 'approval_panel.dart';
+import 'background_work_banner.dart';
 import 'composer.dart';
 import 'plan_panel.dart';
 import 'plan_ribbon.dart';
+import 'session_actions.dart' show confirmAndStopSession;
 import 'session_header.dart';
 import 'transcript_list.dart';
 
@@ -160,6 +164,27 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
                 ),
               ),
             Expanded(child: TranscriptList(state: state)),
+            // Background jobs will wake the session again on their own: say
+            // so and offer the way to really stop it. Idle only, and the
+            // approval panel wins the slot when a dialog is pending.
+            if (state.phase == SessionPhase.ready &&
+                !state.running &&
+                state.backgroundWork &&
+                state.pendingUi.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  OmpMetrics.s3,
+                  OmpMetrics.s2,
+                  OmpMetrics.s3,
+                  0,
+                ),
+                child: BackgroundWorkBanner(
+                  onStop: () {
+                    // Not awaited: the flow pops the screen on success.
+                    unawaited(confirmAndStopSession(context, ref, widget.gwId));
+                  },
+                ),
+              ),
             // Blocking dialogs take over the composer slot; non-blocking
             // notify requests never reach pendingUi (the reducer filters).
             if (state.pendingUi.isNotEmpty)

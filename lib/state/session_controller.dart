@@ -112,6 +112,7 @@ class SessionState {
     this.turnStats,
     this.lastFailedSendId,
     this.ackedRetryIds = const <String>{},
+    this.backgroundWork = false,
   }) : transcript = transcript ?? emptyTranscript();
 
   final String gwId;
@@ -166,6 +167,14 @@ class SessionState {
   /// is unchanged (triage #12).
   final Set<String> ackedRetryIds;
 
+  /// omp still has background jobs (async task subagents, async bash) that
+  /// can inject a follow-up and wake the session on their own. From
+  /// /state's hasPendingAsyncWork (the poll after agent_end is the signal
+  /// that matters: after a user abort agent_end carries no flag), the
+  /// agent_end awaitingAsyncWork fast path, cleared by session_settled.
+  /// Older omp builds omit the fields; missing reads as false.
+  final bool backgroundWork;
+
   /// Blocking dialogs omp is waiting on (for the approval takeover UI).
   List<UiRequest> get pendingUi => transcript.pendingUi;
 
@@ -194,6 +203,7 @@ class SessionState {
     bool clearTurnStats = false,
     String? lastFailedSendId,
     Set<String>? ackedRetryIds,
+    bool? backgroundWork,
   }) {
     return SessionState(
       gwId: gwId,
@@ -214,6 +224,7 @@ class SessionState {
       turnStats: clearTurnStats ? null : (turnStats ?? this.turnStats),
       lastFailedSendId: lastFailedSendId ?? this.lastFailedSendId,
       ackedRetryIds: ackedRetryIds ?? this.ackedRetryIds,
+      backgroundWork: backgroundWork ?? this.backgroundWork,
     );
   }
 }
@@ -549,8 +560,16 @@ class SessionController extends Notifier<SessionState> {
         state = state.copyWith(
           clearActivity: true,
           turnStats: _turnStatsForLastTurn(),
+          // Fast path: omp says the only possible resume is a background
+          // job result. After a user abort agent_end arrives WITHOUT this
+          // flag even with jobs running; the /state poll then decides.
+          backgroundWork:
+              state.backgroundWork || event.raw['awaitingAsyncWork'] == true,
         );
         _scheduleStats();
+      case 'session_settled':
+        // omp went quiet with no background work left.
+        state = state.copyWith(backgroundWork: false);
       case 'tool_execution_start':
         final name = event.toolName ?? '';
         state = state.copyWith(
@@ -671,6 +690,11 @@ class SessionController extends Notifier<SessionState> {
       // active.state.todoPhases, refreshed by the state poll).
       final phases = normalizePhases(st['todoPhases']);
       state = state.copyWith(planPhases: phases);
+      // Background work rides the same /state payload. Missing field
+      // (older omp builds) reads as false. This poll also runs on the
+      // initial open (_open calls it), so a session opened onto idle
+      // background work is flagged from the start.
+      state = state.copyWith(backgroundWork: st['hasPendingAsyncWork'] == true);
       ref
           .read(sessionsStoreProvider.notifier)
           .setTodoActive(gwId, hasActiveTodo(phases));

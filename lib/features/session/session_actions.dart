@@ -11,6 +11,58 @@ import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
 import 'changes_page.dart';
 
+/// What [confirmAndStopSession] ended up doing.
+enum StopSessionOutcome {
+  /// The user confirmed and the gateway session was deleted.
+  stopped,
+
+  /// The user backed out of the confirm dialog.
+  cancelled,
+
+  /// The delete failed; the caller decides how to say so.
+  failed,
+}
+
+/// The one stop-session flow: confirm dialog, then DELETE the gateway
+/// session. Used by the overflow menu and by the background-work banner.
+/// On success the session leaves the rail and the session screen pops.
+Future<StopSessionOutcome> confirmAndStopSession(
+  BuildContext context,
+  WidgetRef ref,
+  String gwId,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Stop session'),
+      content: const Text(
+        'The agent stops. The transcript is saved in History.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Stop'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true) return StopSessionOutcome.cancelled;
+  try {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.deleteSession(gwId);
+  } catch (_) {
+    return StopSessionOutcome.failed;
+  }
+  if (!context.mounted) return StopSessionOutcome.stopped;
+  ref.read(sessionsStoreProvider.notifier).remove(gwId);
+  Navigator.of(context).pop();
+  return StopSessionOutcome.stopped;
+}
+
 class SessionActions extends ConsumerStatefulWidget {
   const SessionActions({super.key, required this.gwId});
 
@@ -33,7 +85,8 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
 
   Future<void> _rename() async {
     final controller = TextEditingController(
-        text: ref.read(sessionControllerProvider(widget.gwId)).info?.title ?? '');
+      text: ref.read(sessionControllerProvider(widget.gwId)).info?.title ?? '',
+    );
     try {
       final name = await showDialog<String>(
         context: context,
@@ -46,11 +99,13 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel')),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
             TextButton(
-                onPressed: () => Navigator.of(context).pop(controller.text),
-                child: const Text('Rename')),
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text('Rename'),
+            ),
           ],
         ),
       );
@@ -79,17 +134,20 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
           content: TextField(
             controller: controller,
             autofocus: true,
-            decoration:
-                const InputDecoration(hintText: 'What should it keep? (optional)'),
+            decoration: const InputDecoration(
+              hintText: 'What should it keep? (optional)',
+            ),
             onSubmitted: (v) => Navigator.of(context).pop(v),
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel')),
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
             TextButton(
-                onPressed: () => Navigator.of(context).pop(controller.text),
-                child: const Text('Compact')),
+              onPressed: () => Navigator.of(context).pop(controller.text),
+              child: const Text('Compact'),
+            ),
           ],
         ),
       );
@@ -107,35 +165,14 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
   }
 
   Future<void> _stopSession() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Stop session'),
-        content: const Text(
-            'The agent stops. The transcript is saved in History.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Stop')),
-        ],
-      ),
-    );
-    if (confirmed != true || _stopping) return;
     setState(() => _stopping = true);
-    try {
-      final env = await ref.read(sessionEnvProvider.future);
-      await env.client.deleteSession(widget.gwId);
-    } catch (_) {
+    final outcome = await confirmAndStopSession(context, ref, widget.gwId);
+    if (outcome == StopSessionOutcome.failed) {
       if (mounted) setState(() => _stopping = false);
       _snack('Could not stop the session');
       return;
     }
-    if (!mounted) return;
-    ref.read(sessionsStoreProvider.notifier).remove(widget.gwId);
-    if (mounted) Navigator.of(context).pop();
+    if (mounted) setState(() => _stopping = false);
   }
 
   Future<void> _markDone() async {
@@ -151,8 +188,9 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
-    final done = ref.watch(reviewedStoreProvider.select(
-        (s) => s.done.contains(widget.gwId)));
+    final done = ref.watch(
+      reviewedStoreProvider.select((s) => s.done.contains(widget.gwId)),
+    );
     return PopupMenuButton<String>(
       tooltip: 'Session actions',
       icon: _stopping
@@ -160,7 +198,10 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
               width: 18,
               height: 18,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: tokens.ink2))
+                strokeWidth: 2,
+                color: tokens.ink2,
+              ),
+            )
           : Icon(Icons.more_vert, color: tokens.ink),
       onSelected: (v) {
         switch (v) {
@@ -180,8 +221,7 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
         const PopupMenuItem(value: 'changes', child: Text('Changes')),
         const PopupMenuItem(value: 'rename', child: Text('Rename')),
         const PopupMenuItem(value: 'compact', child: Text('Compact')),
-        if (!done)
-          const PopupMenuItem(value: 'done', child: Text('Mark done')),
+        if (!done) const PopupMenuItem(value: 'done', child: Text('Mark done')),
         const PopupMenuItem(value: 'stop', child: Text('Stop session')),
       ],
     );

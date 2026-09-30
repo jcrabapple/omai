@@ -1173,4 +1173,107 @@ void main() {
       ]);
     });
   });
+
+  group('background work flag', () {
+    Future<(FakeGateway, SocketHub, FakeScheduler, ProviderContainer)>
+    opened() async {
+      final gateway = FakeGateway(infoJson: infoJson());
+      final hub = SocketHub();
+      final scheduler = FakeScheduler();
+      final container = makeContainer(
+        gateway: gateway,
+        hub: hub,
+        scheduler: scheduler,
+      );
+      final sub = container.listen(
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
+      addTearDown(sub.close);
+      await pumpEventQueue();
+      expect(
+        container.read(sessionControllerProvider('abc')).phase,
+        SessionPhase.ready,
+      );
+      return (gateway, hub, scheduler, container);
+    }
+
+    test(
+      '/state hasPendingAsyncWork:true after agent_end sets backgroundWork',
+      () async {
+        final (gateway, hub, scheduler, container) = await opened();
+        gateway.stateBody = {'hasPendingAsyncWork': true};
+        hub.current.frame(1, {'type': 'agent_end'});
+        // _scheduleStats uses a real Timer, not the scheduler.
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        await pumpEventQueue();
+        expect(
+          container.read(sessionControllerProvider('abc')).backgroundWork,
+          isTrue,
+          reason: 'the post-turn /state poll is the signal that matters',
+        );
+      },
+    );
+
+    test('missing hasPendingAsyncWork reads as false', () async {
+      final (gateway, hub, scheduler, container) = await opened();
+      gateway.stateBody = {};
+      hub.current.frame(1, {'type': 'agent_end'});
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      await pumpEventQueue();
+      expect(
+        container.read(sessionControllerProvider('abc')).backgroundWork,
+        isFalse,
+        reason: 'older omp builds omit the field',
+      );
+    });
+
+    test('agent_end with awaitingAsyncWork:true sets it immediately', () async {
+      final (_, hub, _, container) = await opened();
+      hub.current.frame(1, {'type': 'agent_end', 'awaitingAsyncWork': true});
+      await pumpEventQueue();
+      expect(
+        container.read(sessionControllerProvider('abc')).backgroundWork,
+        isTrue,
+        reason: 'the event is the fast path',
+      );
+    });
+
+    test('session_settled clears it', () async {
+      final (gateway, hub, scheduler, container) = await opened();
+      gateway.stateBody = {'hasPendingAsyncWork': true};
+      hub.current.frame(1, {'type': 'agent_end'});
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      await pumpEventQueue();
+      expect(
+        container.read(sessionControllerProvider('abc')).backgroundWork,
+        isTrue,
+      );
+      hub.current.frame(2, {'type': 'session_settled'});
+      await pumpEventQueue();
+      expect(
+        container.read(sessionControllerProvider('abc')).backgroundWork,
+        isFalse,
+        reason: 'nothing left to wake the session',
+      );
+    });
+
+    test('the initial open reads it from /state', () async {
+      final gateway = FakeGateway(infoJson: infoJson());
+      gateway.stateBody = {'hasPendingAsyncWork': true};
+      final hub = SocketHub();
+      final container = makeContainer(gateway: gateway, hub: hub);
+      final sub = container.listen(
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
+      addTearDown(sub.close);
+      await pumpEventQueue();
+      expect(
+        container.read(sessionControllerProvider('abc')).backgroundWork,
+        isTrue,
+        reason: 'opening onto idle background work flags it from the start',
+      );
+    });
+  });
 }
