@@ -70,7 +70,7 @@ AtQuery? extractAtQuery(String beforeCaret) {
     final prev = q == 0 ? '' : beforeCaret.substring(q - 1, q);
     final opened = prev.isEmpty || _whitespace.hasMatch(prev);
     final rest = beforeCaret.substring(q + 2);
-    if (opened && !rest.contains('"')) {
+    if (opened && !rest.contains('"') && !rest.contains('\n')) {
       return AtQuery(start: q, query: rest, quoted: true);
     }
   }
@@ -159,17 +159,50 @@ List<FileIndexEntry> rankEntries(List<FileIndexEntry> entries, String query) {
 /// nor the end of the text; an existing separator is kept as is. Returns the
 /// new full text and the caret offset inside it.
 ({String text, int caret}) insertMention(String text, AtQuery at, String path) {
-  int end;
-  if (at.quoted) {
-    final close = text.indexOf('"', at.start + 2);
-    end = close == -1 ? text.length : close + 1;
-  } else {
-    end = at.start + 1;
+  final end = _tokenEnd(text, at);
+  final token = _whitespace.hasMatch(path) ? '@"$path"' : '@$path';
+  final gap = end < text.length && !_isWhitespaceChar(text[end]) ? ' ' : '';
+  return (
+    text: text.substring(0, at.start) + token + gap + text.substring(end),
+    caret: at.start + token.length + gap.length,
+  );
+}
+
+/// Where the @-token being replaced ends, given the full text. For a quoted
+/// token that is the closing quote plus one - but only when that quote sits
+/// on the same line as the trigger; a quote on a later line is somebody
+/// else's text, and an unclosed token ends where the typing stopped, at
+/// `at.start + 2 + at.query.length`. Never extends past a newline.
+int _tokenEnd(String text, AtQuery at) {
+  if (!at.quoted) {
+    var end = at.start + 1;
     while (end < text.length && !_isWhitespaceChar(text[end])) {
       end++;
     }
+    return end;
   }
-  final token = _whitespace.hasMatch(path) ? '@"$path"' : '@$path';
+  final close = text.indexOf('"', at.start + 2);
+  final newline = text.indexOf('\n', at.start + 2);
+  if (close != -1 && (newline == -1 || close < newline)) return close + 1;
+  return at.start + 2 + at.query.length;
+}
+
+/// What drilling into [dirPath] (ending with `/`) writes. Same end-of-token
+/// rules as [insertMention], but the token is left OPEN: a path with
+/// whitespace, or a token that was already quoted, becomes `@"dir/` with the
+/// caret right after the slash and no closing quote, so the query stays open
+/// and the user can keep typing; picking a file later closes the quote.
+/// (Deliberate deviation from the web atQuery.ts, which has no drill
+/// rewriting: the web touch sheet keeps drill state outside the text, so the
+/// web never hits the closed-quote problem this avoids.)
+({String text, int caret}) insertDrill(
+  String text,
+  AtQuery at,
+  String dirPath,
+) {
+  final end = _tokenEnd(text, at);
+  final quoted = at.quoted || _whitespace.hasMatch(dirPath);
+  final token = quoted ? '@"$dirPath' : '@$dirPath';
   final gap = end < text.length && !_isWhitespaceChar(text[end]) ? ' ' : '';
   return (
     text: text.substring(0, at.start) + token + gap + text.substring(end),

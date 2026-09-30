@@ -3,6 +3,7 @@
 // variant: the popover-style menu follows the slash menu's pattern here).
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:omai/api/client.dart';
+import 'package:omai/composer/at_query.dart';
 import 'package:omai/composer/drafts.dart';
 import 'package:omai/features/session/at_menu.dart';
 import 'package:omai/features/session/session_screen.dart';
@@ -70,7 +72,7 @@ class MemoryDraftKv implements DraftKv {
 /// Gateway mock: /files answers per prefix, optionally held on a gate so a
 /// response can be made stale.
 class AtGateway {
-  AtGateway();
+  AtGateway({this.commands = const []});
 
   /// Prefixes requested, in order.
   final calls = <String>[];
@@ -84,6 +86,18 @@ class AtGateway {
   /// Hold a prefix's response until completed.
   final Map<String, Completer<void>> gates = {};
 
+  /// Slash commands reported by /commands.
+  List<Object?> commands;
+
+  /// Hold /prompt until completed (K4 send-in-flight test).
+  Completer<void>? promptGate;
+
+  /// Make /prompt fail once the gate opens.
+  bool failPrompt = false;
+
+  /// How many /prompt calls were made.
+  int promptCalls = 0;
+
   http.Client client() => MockClient((req) async {
     if (req.url.path.endsWith('/files')) {
       final prefix = req.url.queryParameters['prefix'] ?? '';
@@ -96,9 +110,21 @@ class AtGateway {
       }
       return _json(responses[prefix] ?? const {'entries': []});
     }
+    if (req.url.path.endsWith('/prompt')) {
+      promptCalls++;
+      final gate = promptGate;
+      if (gate != null) await gate.future;
+      if (failPrompt) return _json({'error': 'nope'}, status: 500);
+      return _json({
+        'gwId': 'abc',
+        'cwd': '/work/x',
+        'isStreaming': false,
+        'lastEventSeq': 0,
+      });
+    }
     if (req.url.path.endsWith('/commands')) {
       return _json({
-        'data': {'commands': []},
+        'data': {'commands': commands},
       });
     }
     return _json({
@@ -123,6 +149,7 @@ class SocketHub {
 ProviderContainer _container({
   required AtGateway gateway,
   required SocketHub hub,
+  MemoryDraftKv? drafts,
 }) {
   final env = SessionEnv(
     client: GatewayClient(
@@ -145,7 +172,7 @@ ProviderContainer _container({
       tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
       sessionsPollIntervalProvider.overrideWithValue(const Duration(hours: 1)),
       reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
-      draftKvProvider.overrideWithValue(MemoryDraftKv()),
+      draftKvProvider.overrideWithValue(drafts ?? MemoryDraftKv()),
       gatewayClientFactoryProvider.overrideWith(
         (ref) =>
             (baseUrl, token) => GatewayClient(
@@ -470,5 +497,301 @@ void main() {
     await _settleFetch(tester);
     expect(tester.takeException(), isNull);
     expect(find.byType(AtMenu), findsOneWidget);
+  });
+
+  testWidgets(
+    'drilling into a folder with whitespace keeps the menu open (K2)',
+    (tester) async {
+      final docsEntries = {
+        'entries': [
+          {'name': 'docs v2', 'path': 'docs v2', 'isDir': true, 'size': null},
+          {
+            'name': 'readme.md',
+            'path': 'docs v2/readme.md',
+            'isDir': false,
+            'size': 5,
+          },
+        ],
+      };
+      final gateway = AtGateway()
+        ..responses[''] = docsEntries
+        ..responses['docs v2'] = {
+          'entries': [
+            {
+              'name': 'readme.md',
+              'path': 'docs v2/readme.md',
+              'isDir': false,
+              'size': 5,
+            },
+          ],
+        };
+      final container = _container(gateway: gateway, hub: SocketHub());
+      addTearDown(container.dispose);
+      await _pumpReady(tester, container);
+
+      await _type(tester, '@');
+      await _settleFetch(tester);
+      await tester.tap(find.text('docs v2/'));
+      await tester.pump();
+      await _settleFetch(tester);
+
+      expect(
+        tester.widget<TextField>(_composerField()).controller!.text,
+        '@"docs v2/',
+        reason: 'the drill writes an open quoted token, caret after the slash',
+      );
+      expect(gateway.calls, ['', 'docs v2']);
+      expect(
+        find.byType(AtMenu),
+        findsOneWidget,
+        reason: 'the menu stays open in the drilled directory',
+      );
+      expect(find.text('readme.md'), findsOneWidget);
+
+      await tester.tap(find.text('readme.md'));
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(_composerField()).controller!.text,
+        '@"docs v2/readme.md"',
+      );
+      expect(find.byType(AtMenu), findsNothing);
+    },
+  );
+
+  testWidgets('the @ menu stays closed while a send is in flight and after '
+      'a failure, until the user edits (K4)', (tester) async {
+    final gateway = AtGateway()
+      ..responses['src'] = {
+        'entries': [
+          {
+            'name': 'main.dart',
+            'path': 'src/main.dart',
+            'isDir': false,
+            'size': 1,
+          },
+        ],
+      }
+      ..promptGate = Completer<void>();
+    final container = _container(gateway: gateway, hub: SocketHub());
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    await _type(tester, 'look @src/ma');
+    await _settleFetch(tester);
+    await tester.tap(find.text('main.dart'));
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(_composerField()).controller!.text,
+      'look @src/main.dart',
+    );
+    final callsBeforeSend = gateway.calls.length;
+
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+    await tester.pump();
+    await _settleFetch(tester);
+    expect(gateway.promptCalls, 1, reason: 'the send is in flight');
+    expect(find.byType(AtMenu), findsNothing, reason: 'no menu mid-send');
+    expect(
+      gateway.calls.length,
+      callsBeforeSend,
+      reason: 'no /files request while the send is pending',
+    );
+
+    // The send fails: the text comes back, the menu stays closed.
+    gateway.failPrompt = true;
+    gateway.promptGate!.complete();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(_composerField()).controller!.text,
+      'look @src/main.dart',
+      reason: 'a failed send restores the words',
+    );
+    expect(find.byType(AtMenu), findsNothing, reason: 'still no menu');
+    expect(
+      gateway.calls.length,
+      callsBeforeSend,
+      reason: 'no refetch after the failure either',
+    );
+
+    // Editing re-enables the menu.
+    await _type(tester, 'look @src/ma');
+    await _settleFetch(tester);
+    expect(find.byType(AtMenu), findsOneWidget);
+  });
+
+  testWidgets('a restored draft ending in an @-token does not open the menu '
+      'until the user types (K5)', (tester) async {
+    final gateway = AtGateway()
+      ..responses['src'] = {
+        'entries': [
+          {
+            'name': 'main.dart',
+            'path': 'src/main.dart',
+            'isDir': false,
+            'size': 1,
+          },
+        ],
+      };
+    final drafts = MemoryDraftKv();
+    drafts.map[draftKey('c1', 'abc')] = 'inspect @src/main.dart';
+    final container = _container(
+      gateway: gateway,
+      hub: SocketHub(),
+      drafts: drafts,
+    );
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+    // Let any fetch the restore might have triggered fire.
+    await _settleFetch(tester);
+
+    expect(find.byType(AtMenu), findsNothing, reason: 'no menu on open');
+    expect(gateway.calls, isEmpty, reason: 'no /files request on open');
+
+    // One character: the menu opens for real.
+    await _type(tester, 'inspect @src/main.dart!');
+    await _settleFetch(tester);
+    expect(find.byType(AtMenu), findsOneWidget);
+  });
+
+  testWidgets('closing and reopening the menu on the same directory '
+      're-fetches (K6)', (tester) async {
+    final gateway = AtGateway()..responses[''] = entries;
+    final container = _container(gateway: gateway, hub: SocketHub());
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    await _type(tester, '@');
+    await _settleFetch(tester);
+    expect(gateway.calls, ['']);
+    // Delete the token: the menu closes.
+    await _type(tester, '');
+    await tester.pump();
+    expect(find.byType(AtMenu), findsNothing);
+    // Reopen on the cwd: the cache must be dropped, so fetch again.
+    await _type(tester, '@');
+    await _settleFetch(tester);
+    expect(gateway.calls, ['', ''], reason: 'the second open re-fetches');
+    expect(find.byType(AtMenu), findsOneWidget);
+  });
+
+  testWidgets('a picked mention is saved to the draft store (K7)', (
+    tester,
+  ) async {
+    final gateway = AtGateway()
+      ..responses['src'] = {
+        'entries': [
+          {
+            'name': 'main.dart',
+            'path': 'src/main.dart',
+            'isDir': false,
+            'size': 1,
+          },
+        ],
+      };
+    final drafts = MemoryDraftKv();
+    final container = _container(
+      gateway: gateway,
+      hub: SocketHub(),
+      drafts: drafts,
+    );
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    await _type(tester, 'look @src/ma');
+    await _settleFetch(tester);
+    // Let the typing draft-save timer fire before the pick, so the assert
+    // below can only pass because of the pick itself.
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(drafts.map[draftKey('c1', 'abc')], 'look @src/ma');
+
+    await tester.tap(find.text('main.dart'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(
+      drafts.map[draftKey('c1', 'abc')],
+      'look @src/main.dart',
+      reason: 'the inserted mention is persisted like typed text',
+    );
+  });
+
+  testWidgets('the slash menu and the @ menu never show together (K8)', (
+    tester,
+  ) async {
+    final gateway = AtGateway()
+      ..commands = [
+        {
+          'name': 'compact',
+          'description': 'Trim the transcript',
+          'source': 'builtin',
+        },
+      ]
+      ..responses[''] = entries;
+    final container = _container(gateway: gateway, hub: SocketHub());
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    // Control: the slash menu really can open in this session.
+    await _type(tester, '/comp');
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(SlashMenu), findsOneWidget);
+
+    // With the @ menu open, the slash menu is suppressed.
+    await _type(tester, '@src');
+    await _settleFetch(tester);
+    expect(find.byType(AtMenu), findsOneWidget);
+    expect(
+      find.byType(SlashMenu),
+      findsNothing,
+      reason: 'only one menu may be open',
+    );
+  });
+
+  testWidgets('at rows read one label each and mark the active row (K9)', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: OmpTheme.data(OmpPreset.terminal),
+        home: Scaffold(
+          body: AtMenu(
+            entries: [
+              const FileIndexEntry(
+                name: 'src',
+                path: 'src',
+                isDir: true,
+                size: null,
+              ),
+              const FileIndexEntry(
+                name: 'main.dart',
+                path: 'src/main.dart',
+                isDir: false,
+                size: 120,
+              ),
+            ],
+            active: 1,
+            note: null,
+            onPick: (_) {},
+            onHover: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    final dir = tester.getSemantics(find.text('src/'));
+    expect(dir.label, 'Folder src');
+    expect(dir.flagsCollection.isButton, isTrue);
+    expect(dir.flagsCollection.isSelected, Tristate.isFalse);
+
+    final file = tester.getSemantics(find.text('main.dart'));
+    expect(file.label, 'File main.dart, 120 B');
+    expect(file.flagsCollection.isButton, isTrue);
+    expect(file.flagsCollection.isSelected, Tristate.isTrue);
+    semantics.dispose();
   });
 }

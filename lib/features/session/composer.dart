@@ -120,6 +120,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   /// Directory currently being listed ('' = the cwd); null = nothing.
   String? _atActivePrefix;
 
+  /// The previous token directory (null = no token), for the cache rule.
+  String? _atPrevPrefix;
+
   /// Listings live one @-interaction: omp creates files as it works, so a
   /// new directory or a send drops the cache.
   final Map<String, List<FileIndexEntry>> _atCache = {};
@@ -182,6 +185,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     if (draft.isNotEmpty && _text.text.isEmpty) {
       _text.text = draft;
       _text.selection = TextSelection.collapsed(offset: _text.text.length);
+      // A restored draft may end in an @-token: it was not being typed, so
+      // the menu must not open (or fetch) on session open.
+      _atDismissedFor = draft;
     }
   }
 
@@ -196,10 +202,15 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     // Any edit rebuilds the @-token, so a dismissal never survives an input.
     _atDismissedFor = null;
     _atSel = 0;
-    // Debounced save, like the web's 250ms timer.
+    _scheduleDraftSave();
+    setState(() {});
+  }
+
+  /// Debounced save, like the web's 250ms timer. Shared by typed edits and
+  /// programmatic mention inserts.
+  void _scheduleDraftSave() {
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 250), _saveDraftNow);
-    setState(() {});
   }
 
   // ------------------------------------------------- @-file mentions
@@ -214,7 +225,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   AtQuery? get _currentAt => extractAtQuery(_beforeCaret);
 
   bool get _atOpen {
-    if (_sessionEnded) return false;
+    // A send in flight owns the field's text: no menu (and so no fetch)
+    // until it resolves and the user edits again.
+    if (_sessionEnded || _sending) return false;
     final at = _currentAt;
     return at != null && _atDismissedFor != _text.text;
   }
@@ -228,6 +241,14 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   /// serve repeats from the cache, drop the cache when the directory moves.
   /// Called from build with the currently wanted prefix (null = no menu).
   void _syncAt(String? prefix) {
+    // Listings live one @-interaction: track the previous token directory
+    // INCLUDING null (no token), and drop the cache whenever it changes to a
+    // non-null directory - so closing then reopening `@` on the cwd
+    // re-fetches, while refining inside one open token does not.
+    if (prefix != _atPrevPrefix) {
+      if (prefix != null) _atCache.clear();
+      _atPrevPrefix = prefix;
+    }
     if (prefix != _atActivePrefix) {
       _atActivePrefix = prefix;
       _atDebounce?.cancel();
@@ -266,9 +287,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           }
         }
       }
-      _atCache
-        ..clear()
-        ..[prefix] = entries;
+      _atCache[prefix] = entries;
       setState(() {
         _atEntries = entries;
         _atNote = null;
@@ -299,7 +318,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final at = _currentAt;
     if (at == null) return;
     _applyMention(
-      insertMention(_text.text, at, '${entry.path}/'),
+      insertDrill(_text.text, at, '${entry.path}/'),
       keepOpen: true,
     );
   }
@@ -320,6 +339,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       _atDismissedFor = res.text;
     }
     _atSel = 0;
+    _scheduleDraftSave();
     _focus.requestFocus();
     setState(() {});
   }
@@ -412,7 +432,6 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     setState(() => _sending = true);
     // omp may create files during the turn: drop the @-listing cache.
     _atCache.clear();
-    _atDismissedFor = null;
     final images = [for (final a in _images) toPromptImage(a.bytes)];
     final ok = await ref
         .read(sessionControllerProvider(widget.gwId).notifier)
@@ -434,6 +453,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       _images.clear();
       _imageProblem = null;
       _dismissedFor = null;
+      _atDismissedFor = null;
       await _saveDraftNow();
     } else {
       // The failed bubble explains why; the words come back so nothing is
@@ -449,6 +469,8 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
               images: List.of(_images),
             );
       _dismissedFor = null;
+      // The text was restored: keep the @ menu closed until the user edits.
+      _atDismissedFor = _text.text;
       await _saveDraftNow();
     }
     setState(() {});

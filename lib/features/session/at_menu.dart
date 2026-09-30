@@ -58,8 +58,14 @@ class AtMenu extends StatelessWidget {
       final idx = i;
       children.add(
         Semantics(
-          label: e.isDir ? 'Folder ${e.name}' : 'File ${e.name}',
+          // One label per row: without excludeSemantics the child text nodes
+          // merge in and TalkBack reads the filename twice.
+          excludeSemantics: true,
+          label: e.isDir
+              ? 'Folder ${e.name}'
+              : 'File ${e.name}, ${sizeLabel(e)}',
           button: true,
+          selected: idx == active,
           child: InkWell(
             onTap: () => onPick(e),
             onHover: (h) {
