@@ -332,4 +332,49 @@ void main() {
 
     expect((gateway.bodies.single as Map).containsKey('thinking'), isFalse);
   });
+
+  testWidgets(
+    'the selected approval mode is marked by icon, border and color',
+    (tester) async {
+      final gateway = FakeGateway();
+      final container = _container(gateway);
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+
+      Finder row(String label) => find
+          .ancestor(of: find.text(label), matching: find.byType(Material))
+          .first;
+      Finder radioIn(String label, IconData icon) =>
+          find.descendant(of: row(label), matching: find.byIcon(icon));
+
+      // Yolo is the default: filled radio, accent border; the others empty.
+      expect(radioIn('Yolo', Icons.radio_button_checked), findsOneWidget);
+      expect(
+        radioIn('Always ask', Icons.radio_button_unchecked),
+        findsOneWidget,
+      );
+      final theme = Theme.of(tester.element(find.text('Yolo')));
+      final accent = theme.colorScheme.primary;
+      RoundedRectangleBorder shape(String label) =>
+          tester.widget<Material>(row(label)).shape! as RoundedRectangleBorder;
+      expect(shape('Yolo').side.color, accent);
+      expect(shape('Yolo').side.width, 2);
+      expect(shape('Always ask').side.width, lessThan(2));
+
+      await tester.ensureVisible(find.text('Always ask'));
+      await tester.tap(find.text('Always ask'));
+      await tester.pump();
+      expect(radioIn('Always ask', Icons.radio_button_checked), findsOneWidget);
+      expect(radioIn('Yolo', Icons.radio_button_unchecked), findsOneWidget);
+      expect(shape('Always ask').side.color, accent);
+
+      // TalkBack hears it as a checked option in a group.
+      final node = tester.getSemantics(
+        find
+            .ancestor(of: row('Always ask'), matching: find.byType(Semantics))
+            .first,
+      );
+      expect(node.flagsCollection.isChecked, CheckedState.isTrue);
+    },
+  );
 }

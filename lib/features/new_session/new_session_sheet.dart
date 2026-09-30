@@ -294,49 +294,12 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
             ),
             const SizedBox(height: OmpMetrics.s1),
             for (final mode in approvalModes)
-              Semantics(
-                button: true,
+              _ApprovalOption(
+                tokens: tokens,
+                label: mode.label,
+                hint: mode.hint,
                 selected: _approval == mode.id,
-                label: '${mode.label}. ${mode.hint}',
-                child: InkWell(
-                  onTap: () => setState(() => _approval = mode.id),
-                  borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
-                  child: Container(
-                    width: double.infinity,
-                    constraints: const BoxConstraints(minHeight: 48),
-                    margin: const EdgeInsets.symmetric(vertical: OmpMetrics.s1),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: OmpMetrics.s3,
-                      vertical: OmpMetrics.s2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _approval == mode.id
-                          ? tokens.accentSoft
-                          : tokens.inset,
-                      borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          mode.label,
-                          style: TextStyle(
-                            color: tokens.ink,
-                            fontSize: OmpMetrics.fsBase,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          mode.hint,
-                          style: TextStyle(
-                            color: tokens.ink3,
-                            fontSize: OmpMetrics.fsSm,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                onTap: () => setState(() => _approval = mode.id),
               ),
             if (_error != null) ...[
               const SizedBox(height: OmpMetrics.s2),
@@ -385,6 +348,96 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One approval-mode row. The selected row has to read at a glance on a dark
+/// sheet, so it's marked three ways: a filled radio icon (shape, not only
+/// color), a 2px accent border, and an accent label.
+class _ApprovalOption extends StatelessWidget {
+  const _ApprovalOption({
+    required this.tokens,
+    required this.label,
+    required this.hint,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final OmpTokens tokens;
+  final String label;
+  final String hint;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(OmpMetrics.radiusMd);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: OmpMetrics.s1),
+      child: Semantics(
+        button: true,
+        inMutuallyExclusiveGroup: true,
+        checked: selected,
+        selected: selected,
+        label: '$label. $hint',
+        excludeSemantics: true,
+        child: Material(
+          color: selected ? tokens.accentSoft : tokens.inset,
+          shape: RoundedRectangleBorder(
+            borderRadius: radius,
+            side: selected
+                ? BorderSide(color: tokens.accent, width: 2)
+                : BorderSide(color: tokens.line),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
+              padding: const EdgeInsets.symmetric(
+                horizontal: OmpMetrics.s3,
+                vertical: OmpMetrics.s2,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 20,
+                    color: selected ? tokens.accent : tokens.ink3,
+                  ),
+                  const SizedBox(width: OmpMetrics.s3),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            color: selected ? tokens.accent : tokens.ink,
+                            fontSize: OmpMetrics.fsBase,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          hint,
+                          style: TextStyle(
+                            color: selected ? tokens.ink2 : tokens.ink3,
+                            fontSize: OmpMetrics.fsSm,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
