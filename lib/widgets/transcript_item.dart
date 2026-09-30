@@ -24,15 +24,16 @@ class TranscriptItemCallbacks {
   /// True while that retry is in flight: the Retry button disables.
   final bool retryingSend;
 
-  /// Retry the last agent turn (assistant messages, idle sessions only).
-  final VoidCallback? onRetryTurn;
+  /// Fork the session at this message (user bubbles; hidden while a turn
+  /// runs or the bubble is pending/failed/empty).
+  final VoidCallback? onFork;
 
   const TranscriptItemCallbacks({
     this.onLinkTap,
     this.onInspect,
     this.onRetrySend,
     this.retryingSend = false,
-    this.onRetryTurn,
+    this.onFork,
   });
 }
 
@@ -57,25 +58,23 @@ class TranscriptItemView extends StatelessWidget {
     final it = item;
     if (it is UserItem) {
       return UserBubble(
-          item: it,
-          onRetry: callbacks.onRetrySend,
-          retrying: callbacks.retryingSend,
-          onInspect: callbacks.onInspect);
+        item: it,
+        onRetry: callbacks.onRetrySend,
+        retrying: callbacks.retryingSend,
+        onInspect: callbacks.onInspect,
+        onFork: callbacks.onFork,
+      );
     }
     if (it is AssistantItem) {
       return AssistantMessage(
         item: it,
         onLinkTap: callbacks.onLinkTap,
         onInspect: callbacks.onInspect,
-        onRetry: callbacks.onRetryTurn,
       );
     }
     if (it is ThinkingItem) return ThinkingRow(item: it);
     if (it is ToolItem) {
-      return ToolGroup(
-        tools: toolRun ?? [it],
-        onInspect: callbacks.onInspect,
-      );
+      return ToolGroup(tools: toolRun ?? [it], onInspect: callbacks.onInspect);
     }
     if (it is SkillItem) return SkillChip(item: it);
     if (it is CommandItem) return CommandCard(item: it);

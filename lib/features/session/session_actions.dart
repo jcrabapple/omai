@@ -3,12 +3,16 @@
 // and the dashboard's stop + mark-done actions.
 
 import 'package:flutter/material.dart';
+
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/reviewed_store.dart';
 import '../../state/session_controller.dart';
 import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
+import 'agents_sheet.dart';
 import 'changes_page.dart';
 
 /// What [confirmAndStopSession] ended up doing.
@@ -207,6 +211,8 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
         switch (v) {
           case 'changes':
             _changes();
+          case 'agents':
+            unawaited(showAgentsSheet(context, widget.gwId));
           case 'rename':
             _rename();
           case 'compact':
@@ -219,6 +225,7 @@ class _SessionActionsState extends ConsumerState<SessionActions> {
       },
       itemBuilder: (context) => [
         const PopupMenuItem(value: 'changes', child: Text('Changes')),
+        const PopupMenuItem(value: 'agents', child: Text('Agents')),
         const PopupMenuItem(value: 'rename', child: Text('Rename')),
         const PopupMenuItem(value: 'compact', child: Text('Compact')),
         if (!done) const PopupMenuItem(value: 'done', child: Text('Mark done')),

@@ -25,12 +25,17 @@ class UserBubble extends StatelessWidget {
   /// Raw-JSON inspector for this message.
   final void Function(Object? raw)? onInspect;
 
+  /// Fork the session at this message; null hides the action (running turn,
+  /// pending/failed/empty bubbles).
+  final VoidCallback? onFork;
+
   const UserBubble({
     super.key,
     required this.item,
     this.onRetry,
     this.retrying = false,
     this.onInspect,
+    this.onFork,
   });
 
   @override
@@ -122,6 +127,7 @@ class UserBubble extends StatelessWidget {
                     raw: item.raw,
                     label: 'Your message',
                     onInspect: onInspect,
+                    onFork: onFork,
                     child: bubble,
                   ),
                 ),

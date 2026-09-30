@@ -63,6 +63,11 @@ class MessageActions extends StatefulWidget {
   /// caller passes null while a turn runs, which hides the action.
   final VoidCallback? onRetry;
 
+  /// Fork the session at this message; present only where a fork makes
+  /// sense. The caller passes null while a turn runs or the message is not
+  /// forkable, which hides the action.
+  final VoidCallback? onFork;
+
   /// Called when the user picks Inspect.
   final void Function(Object? raw)? onInspect;
 
@@ -76,6 +81,7 @@ class MessageActions extends StatefulWidget {
     this.raw,
     this.disabled = false,
     this.onRetry,
+    this.onFork,
     this.onInspect,
   });
 
@@ -84,8 +90,16 @@ class MessageActions extends StatefulWidget {
 }
 
 class _MessageActionsState extends State<MessageActions> {
-  /// Inspect / Retry turn for the selection toolbar.
+  /// Fork / Inspect / Retry turn for the selection toolbar.
   List<ContextMenuButtonItem> _toolbarItems(void Function() dismiss) => [
+    if (widget.onFork != null)
+      ContextMenuButtonItem(
+        label: 'Fork from here',
+        onPressed: () {
+          dismiss();
+          widget.onFork!.call();
+        },
+      ),
     if (widget.onInspect != null)
       ContextMenuButtonItem(
         label: 'Inspect',
@@ -121,6 +135,11 @@ class _MessageActionsState extends State<MessageActions> {
         Offset.zero & overlay.size,
       ),
       items: [
+        if (widget.onFork != null)
+          const PopupMenuItem<String>(
+            value: 'fork',
+            child: Text('Fork from here'),
+          ),
         PopupMenuItem<String>(
           value: 'copy',
           enabled: widget.text.isNotEmpty,
@@ -139,7 +158,9 @@ class _MessageActionsState extends State<MessageActions> {
       ],
     );
     if (choice == null || !context.mounted) return;
-    if (choice == 'copy') {
+    if (choice == 'fork') {
+      widget.onFork?.call();
+    } else if (choice == 'copy') {
       Clipboard.setData(ClipboardData(text: widget.text));
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(
         const SnackBar(content: Text('Copied'), duration: Duration(seconds: 1)),

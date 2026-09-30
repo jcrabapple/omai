@@ -23,11 +23,17 @@ class TranscriptState {
   /// Source of ids for items that have no natural key.
   final int counter;
 
+  /// A backend retry (POST /retry) was accepted and is waiting for omp to
+  /// start the turn. Hides the Retry chip in the meantime; cleared on the
+  /// next agent_start, when omp's events own the transcript again.
+  final bool retried;
+
   const TranscriptState({
     required this.items,
     required this.pendingUi,
     required this.running,
     required this.counter,
+    this.retried = false,
   });
 }
 
@@ -54,7 +60,20 @@ class LocalSendInput extends TranscriptInput {
   final String text;
   final PromptMode mode;
   final List<Object?>? images;
-  const LocalSendInput({required this.localId, required this.text, required this.mode, this.images});
+  const LocalSendInput({
+    required this.localId,
+    required this.text,
+    required this.mode,
+    this.images,
+  });
+}
+
+/// A backend retry (POST /retry, omp abort_retry) was accepted. Only flags
+/// the state: the failed turn stays in the transcript until omp's own events
+/// replace it, so a retry that never produces new events cannot silently
+/// rewrite history.
+class LocalRetryInput extends TranscriptInput {
+  const LocalRetryInput();
 }
 
 class LocalSendFailedInput extends TranscriptInput {
@@ -83,7 +102,8 @@ class _Work {
   final List<UiRequest> pendingUi;
   bool running;
   int counter;
-  _Work(this.items, this.pendingUi, this.running, this.counter);
+  bool retried;
+  _Work(this.items, this.pendingUi, this.running, this.counter, this.retried);
 }
 
 class _Ctx {
@@ -99,33 +119,54 @@ TranscriptState reduce(TranscriptState state, TranscriptInput input) {
     case EventInput():
       return onEvent(state, input.event, input.at);
     case LocalSendInput():
-      if (state.items.any((it) => it is UserItem && it.localId == input.localId)) return state;
+      if (state.items.any(
+        (it) => it is UserItem && it.localId == input.localId,
+      )) {
+        return state;
+      }
       final d = _open(state);
-      d.items.add(UserItem(
-        id: 'local:${input.localId}',
-        localId: input.localId,
-        text: input.text,
-        images: input.images?.length ?? 0,
-        pending: true,
-        note: sendNote(input.mode),
-      ));
+      d.items.add(
+        UserItem(
+          id: 'local:${input.localId}',
+          localId: input.localId,
+          text: input.text,
+          images: input.images?.length ?? 0,
+          pending: true,
+          note: sendNote(input.mode),
+        ),
+      );
       return _close(d);
     case LocalSendFailedInput():
-      final i = state.items.indexWhere((it) => it is UserItem && it.localId == input.localId);
+      final i = state.items.indexWhere(
+        (it) => it is UserItem && it.localId == input.localId,
+      );
       if (i < 0) return state;
       final d = _open(state);
       final prev = d.items[i] as UserItem;
-      d.items[i] = prev.copyWith(pending: false, failed: true, error: input.error);
+      d.items[i] = prev.copyWith(
+        pending: false,
+        failed: true,
+        error: input.error,
+      );
       return _close(d);
     case LocalSendRetryInput():
       final i = state.items.indexWhere(
-          (it) => it is UserItem && it.localId == input.localId && it.failed == true);
+        (it) =>
+            it is UserItem && it.localId == input.localId && it.failed == true,
+      );
       if (i < 0) return state;
       final d = _open(state);
       final prev = d.items[i] as UserItem;
-      d.items[i] =
-          prev.copyWith(pending: true, failed: false, clearError: true);
+      d.items[i] = prev.copyWith(
+        pending: true,
+        failed: false,
+        clearError: true,
+      );
       return _close(d);
+    case LocalRetryInput():
+      // An accepted retry only hides the chip (web: `retried`). The failed
+      // turn stays in the transcript until omp's own events replace it.
+      return state.retried ? state : _copyWith(state, retried: true);
     case PendingUiInput():
       final d = _open(state);
       d.pendingUi
@@ -135,14 +176,79 @@ TranscriptState reduce(TranscriptState state, TranscriptInput input) {
   }
 }
 
-_Work _open(TranscriptState s) => _Work(s.items.toList(), s.pendingUi.toList(), s.running, s.counter);
+_Work _open(TranscriptState s) => _Work(
+  s.items.toList(),
+  s.pendingUi.toList(),
+  s.running,
+  s.counter,
+  s.retried,
+);
 
 TranscriptState _close(_Work d) => TranscriptState(
-      items: List.unmodifiable(d.items),
-      pendingUi: List.unmodifiable(d.pendingUi),
-      running: d.running,
-      counter: d.counter,
+  items: List.unmodifiable(d.items),
+  pendingUi: List.unmodifiable(d.pendingUi),
+  running: d.running,
+  counter: d.counter,
+  retried: d.retried,
+);
+
+TranscriptState _copyWith(TranscriptState s, {bool? retried}) =>
+    TranscriptState(
+      items: s.items,
+      pendingUi: s.pendingUi,
+      running: s.running,
+      counter: s.counter,
+      retried: retried ?? s.retried,
     );
+
+// ---------------------------------------------------------- failed turns
+
+/// The last ordinary user message: a turn boundary. Steers and queued
+/// follow-ups are not boundaries: searching from them as the turn start would
+/// hide a real failure behind them.
+int _turnStart(List<Item> items) {
+  for (var i = items.length - 1; i >= 0; i--) {
+    final it = items[i];
+    if (it is UserItem &&
+        it.note != 'steer' &&
+        it.note != 'steer-pending' &&
+        it.note != 'queued') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/// Error text when the last turn ended in failure, else null. Only backend
+/// turn failures count: an assistant error message, or the 'gave up
+/// retrying' notice. A client-side failed send never appears here: omp never
+/// saw that prompt, so retrying it (abort_retry) is wrong; it is resubmission
+/// territory. The FINAL state of the turn decides: the last failure marker
+/// wins, and a healthy assistant message after the last marker means omp
+/// recovered (its auto-retry succeeded), so there is nothing to retry. A tool
+/// erroring mid-turn does not fail the turn, so tool statuses are ignored.
+String? lastTurnFailure(TranscriptState s) {
+  final start = _turnStart(s.items);
+  if (start < 0) return null;
+  var markerAt = -1;
+  var healthyAt = -1;
+  String? text;
+  for (var i = start + 1; i < s.items.length; i++) {
+    final it = s.items[i];
+    if (it is AssistantItem) {
+      if (it.error != null) {
+        markerAt = i;
+        text = it.error;
+      } else {
+        healthyAt = i;
+      }
+    } else if (it is NoticeItem && it.tag == 'retry' && it.level == 'error') {
+      markerAt = i;
+      text = it.text;
+    }
+  }
+  return markerAt > healthyAt ? text : null;
+}
 
 // ------------------------------------------------------------------ helpers
 
@@ -173,7 +279,12 @@ Split splitContent(Object? content) {
         if (call != null) calls.add(call);
     }
   }
-  return Split(outText.toString(), outThinking.toString(), images, List.unmodifiable(calls));
+  return Split(
+    outText.toString(),
+    outThinking.toString(),
+    images,
+    List.unmodifiable(calls),
+  );
 }
 
 class Split {
@@ -211,7 +322,14 @@ String _keyOf(Map<String, Object?> m, String? messageId, String fallback) {
   return '${m['role']}:${messageId != null && messageId.isNotEmpty ? 'id:$messageId' : fallback}';
 }
 
-const List<String> _summaryKeys = ['command', 'path', 'file_path', 'pattern', 'query', 'url'];
+const List<String> _summaryKeys = [
+  'command',
+  'path',
+  'file_path',
+  'pattern',
+  'query',
+  'url',
+];
 
 String summarize(Map<String, Object?>? args, String? intent) {
   if (intent != null && intent.isNotEmpty) return intent;
@@ -228,7 +346,10 @@ String summarize(Map<String, Object?>? args, String? intent) {
 ({Map<String, Object?>? args, String? intent}) _normArgs(Object? args) {
   final o = _rec(args);
   if (o == null) return (args: null, intent: null);
-  final rest = <String, Object?>{for (final e in o.entries) if (e.key != 'i') e.key: e.value};
+  final rest = <String, Object?>{
+    for (final e in o.entries)
+      if (e.key != 'i') e.key: e.value,
+  };
   final i = o['i'];
   return (args: rest, intent: i is String && i.isNotEmpty ? i : null);
 }
@@ -291,8 +412,15 @@ void _applyMessage(
     case 'user':
       _applyUser(d, m, ctx, messageId: messageId, fallback: fallback);
     case 'assistant':
-      _applyAssistant(d, m, ctx,
-          messageId: messageId, ending: ending, thinkingStreaming: thinkingStreaming, fallback: fallback);
+      _applyAssistant(
+        d,
+        m,
+        ctx,
+        messageId: messageId,
+        ending: ending,
+        thinkingStreaming: thinkingStreaming,
+        fallback: fallback,
+      );
     case 'toolResult':
       _applyToolResult(d, m, ctx);
     case 'custom':
@@ -300,8 +428,13 @@ void _applyMessage(
   }
 }
 
-void _applyUser(_Work d, Map<String, Object?> m, _Ctx ctx,
-    {String? messageId, required String fallback}) {
+void _applyUser(
+  _Work d,
+  Map<String, Object?> m,
+  _Ctx ctx, {
+  String? messageId,
+  required String fallback,
+}) {
   final b = splitContent(messageContent(m));
   if (b.text.isEmpty && b.images == 0) return;
   final key = _keyOf(m, messageId, fallback);
@@ -327,8 +460,8 @@ void _applyUser(_Work d, Map<String, Object?> m, _Ctx ctx,
       final note = steering
           ? 'steer'
           : prev.note == 'queued'
-              ? null
-              : prev.note;
+          ? null
+          : prev.note;
       d.items[i] = prev.copyWith(
         pending: false,
         note: note,
@@ -342,8 +475,13 @@ void _applyUser(_Work d, Map<String, Object?> m, _Ctx ctx,
     if (steering) {
       // The turn ended before this steer's echo: the stale item is still the
       // same message, so confirm it in place instead of adding a second bubble.
-      final j = d.items.indexWhere((it) =>
-          it is UserItem && it.note == 'steer-pending' && it.stale == true && it.text.trim() == text);
+      final j = d.items.indexWhere(
+        (it) =>
+            it is UserItem &&
+            it.note == 'steer-pending' &&
+            it.stale == true &&
+            it.text.trim() == text,
+      );
       if (j >= 0) {
         d.items[j] = (d.items[j] as UserItem).copyWith(
           pending: false,
@@ -357,16 +495,18 @@ void _applyUser(_Work d, Map<String, Object?> m, _Ctx ctx,
       }
     }
   }
-  d.items.add(UserItem(
-    id: 'u:$key',
-    messageKey: key,
-    text: b.text,
-    images: b.images,
-    pending: false,
-    note: steering ? 'steer' : (ctx.live ? 'other-client' : null),
-    timestamp: messageTimestamp(m),
-    raw: m,
-  ));
+  d.items.add(
+    UserItem(
+      id: 'u:$key',
+      messageKey: key,
+      text: b.text,
+      images: b.images,
+      pending: false,
+      note: steering ? 'steer' : (ctx.live ? 'other-client' : null),
+      timestamp: messageTimestamp(m),
+      raw: m,
+    ),
+  );
 }
 
 void _applyAssistant(
@@ -385,19 +525,22 @@ void _applyAssistant(
     final i = _findKeyed(d, 'thinking', key);
     final prev = i >= 0 ? d.items[i] as ThinkingItem : null;
     final streaming = !ending && thinkingStreaming == true;
-    final endedAt = !streaming && (prev?.streaming ?? false) ? (ctx.at ?? prev?.endedAt) : prev?.endedAt;
+    final endedAt = !streaming && (prev?.streaming ?? false)
+        ? (ctx.at ?? prev?.endedAt)
+        : prev?.endedAt;
     _put(
-        d,
-        i,
-        ThinkingItem(
-          id: 'th:$key',
-          messageKey: key,
-          text: b.thinking,
-          streaming: streaming,
-          startedAt: prev?.startedAt ?? ctx.at ?? messageTimestamp(m),
-          endedAt: endedAt,
-          raw: m,
-        ));
+      d,
+      i,
+      ThinkingItem(
+        id: 'th:$key',
+        messageKey: key,
+        text: b.thinking,
+        streaming: streaming,
+        startedAt: prev?.startedAt ?? ctx.at ?? messageTimestamp(m),
+        endedAt: endedAt,
+        raw: m,
+      ),
+    );
   }
 
   final errorMessage = strOf(m, 'errorMessage');
@@ -407,23 +550,24 @@ void _applyAssistant(
   if (b.text.isNotEmpty || error != null) {
     final i = _findKeyed(d, 'assistant', key);
     _put(
-        d,
-        i,
-        AssistantItem(
-          id: 'a:$key',
-          messageKey: key,
-          text: b.text,
-          streaming: !ending,
-          model: strOf(m, 'model'),
-          provider: strOf(m, 'provider'),
-          usage: mapField(m, 'usage'),
-          stopReason: strOf(m, 'stopReason'),
-          error: error,
-          timestamp: messageTimestamp(m),
-          duration: intOf(m, 'duration'),
-          ttft: intOf(m, 'ttft'),
-          raw: m,
-        ));
+      d,
+      i,
+      AssistantItem(
+        id: 'a:$key',
+        messageKey: key,
+        text: b.text,
+        streaming: !ending,
+        model: strOf(m, 'model'),
+        provider: strOf(m, 'provider'),
+        usage: mapField(m, 'usage'),
+        stopReason: strOf(m, 'stopReason'),
+        error: error,
+        timestamp: messageTimestamp(m),
+        duration: intOf(m, 'duration'),
+        ttft: intOf(m, 'ttft'),
+        raw: m,
+      ),
+    );
   }
 
   for (final call in b.calls) {
@@ -470,22 +614,31 @@ void _applyToolResult(_Work d, Map<String, Object?> m, _Ctx ctx) {
   ));
 }
 
-void _applyCustom(_Work d, Map<String, Object?> m, _Ctx ctx,
-    {String? messageId, required String fallback}) {
+void _applyCustom(
+  _Work d,
+  Map<String, Object?> m,
+  _Ctx ctx, {
+  String? messageId,
+  required String fallback,
+}) {
   final key = _keyOf(m, messageId, fallback);
-  final existing = d.items
-      .indexWhere((it) => it.messageKey == key && (it.kind == 'skill' || it.kind == 'notice'));
+  final existing = d.items.indexWhere(
+    (it) => it.messageKey == key && (it.kind == 'skill' || it.kind == 'notice'),
+  );
   if (existing >= 0) return;
   final b = splitContent(messageContent(m));
 
   if (m['customType'] == 'skill-prompt') {
     final details = messageDetails(m);
-    final prompt = details != null && details['prompt'] is String ? details['prompt'] as String : null;
+    final prompt = details != null && details['prompt'] is String
+        ? details['prompt'] as String
+        : null;
     final detailsName = details?['name'];
     final firstLine = b.text.split('\n').first;
     final match = RegExp('invoked the "([^"]+)" skill').firstMatch(firstLine);
-    final name =
-        (detailsName is String && detailsName.isNotEmpty) ? detailsName : (match?.group(1) ?? 'skill');
+    final name = (detailsName is String && detailsName.isNotEmpty)
+        ? detailsName
+        : (match?.group(1) ?? 'skill');
     final lineCount = details?['lineCount'];
     final skill = SkillItem(
       id: 's:$key',
@@ -498,10 +651,13 @@ void _applyCustom(_Work d, Map<String, Object?> m, _Ctx ctx,
       raw: m,
     );
     if (ctx.live) {
-      final i = d.items.indexWhere((it) =>
-          it is UserItem &&
-          it.pending &&
-          ((prompt != null && it.text.trim() == prompt) || it.text.trim().startsWith('/')));
+      final i = d.items.indexWhere(
+        (it) =>
+            it is UserItem &&
+            it.pending &&
+            ((prompt != null && it.text.trim() == prompt) ||
+                it.text.trim().startsWith('/')),
+      );
       if (i >= 0) {
         final localId = d.items[i].id;
         d.items[i] = SkillItem(
@@ -522,8 +678,15 @@ void _applyCustom(_Work d, Map<String, Object?> m, _Ctx ctx,
   }
 
   if (!messageDisplay(m) || b.text.isEmpty) return;
-  d.items.add(NoticeItem(
-      id: 'n:$key', messageKey: key, level: 'info', text: b.text, raw: m));
+  d.items.add(
+    NoticeItem(
+      id: 'n:$key',
+      messageKey: key,
+      level: 'info',
+      text: b.text,
+      raw: m,
+    ),
+  );
 }
 
 // -------------------------------------------------------------------- tools
@@ -548,7 +711,9 @@ void _upsertTool(_Work d, _ToolPatch p) {
   final prev = i >= 0 ? d.items[i] as ToolItem : null;
   final n = _normArgs(p.args);
   final newArgs = n.args;
-  final args = (newArgs != null && newArgs.isNotEmpty) ? newArgs : (prev?.args ?? newArgs);
+  final args = (newArgs != null && newArgs.isNotEmpty)
+      ? newArgs
+      : (prev?.args ?? newArgs);
   // TS: p.intent || n.intent || prev?.intent — empty strings fall through.
   String? intentOf(String? a, String? b, String? c) =>
       a != null && a.isNotEmpty ? a : (b != null && b.isNotEmpty ? b : c);
@@ -565,11 +730,15 @@ void _upsertTool(_Work d, _ToolPatch p) {
     id: 'tool:${p.id}',
     messageKey: prev?.messageKey ?? p.messageKey,
     toolCallId: p.id,
-    toolName: (p.name != null && p.name!.isNotEmpty) ? p.name! : (prev?.toolName ?? 'tool'),
+    toolName: (p.name != null && p.name!.isNotEmpty)
+        ? p.name!
+        : (prev?.toolName ?? 'tool'),
     args: args,
     summary: summarize(args, intent),
     intent: intent,
-    output: finished && p.status == null ? prev.output : (p.output ?? prev?.output ?? ''),
+    output: finished && p.status == null
+        ? prev.output
+        : (p.output ?? prev?.output ?? ''),
     status: status,
     details: p.details ?? prev?.details,
     startedAt: prev?.startedAt ?? p.startedAt,
@@ -604,8 +773,12 @@ void _interrupt(_Work d) {
     if (it is ToolItem && it.status == 'running') {
       d.items[i] = it.copyWith(status: 'interrupted');
     } else if ((it is AssistantItem || it is ThinkingItem)) {
-      if (it is AssistantItem && it.streaming) d.items[i] = it.copyWith(streaming: false);
-      if (it is ThinkingItem && it.streaming) d.items[i] = it.copyWith(streaming: false);
+      if (it is AssistantItem && it.streaming) {
+        d.items[i] = it.copyWith(streaming: false);
+      }
+      if (it is ThinkingItem && it.streaming) {
+        d.items[i] = it.copyWith(streaming: false);
+      }
     }
   }
 }
@@ -613,18 +786,34 @@ void _interrupt(_Work d) {
 // ------------------------------------------------------------------ history
 
 TranscriptState fromHistory(
-    TranscriptState prev, List<Map<String, Object?>> messages, bool streaming) {
-  final d = _Work([], prev.pendingUi.toList(), streaming, prev.counter);
+  TranscriptState prev,
+  List<Map<String, Object?>> messages,
+  bool streaming,
+) {
+  final d = _Work(
+    [],
+    prev.pendingUi.toList(),
+    streaming,
+    prev.counter,
+    prev.retried,
+  );
   for (var i = 0; i < messages.length; i++) {
-    _applyMessage(d, messages[i], const _Ctx(false, null),
-        ending: true, fallback: 'h$i');
+    _applyMessage(
+      d,
+      messages[i],
+      const _Ctx(false, null),
+      ending: true,
+      fallback: 'h$i',
+    );
   }
   if (!streaming) _interrupt(d);
 
   // Keep local sends the server has not echoed yet. Text match against recent
   // user messages.
   final userItems = d.items.whereType<UserItem>().toList(growable: false);
-  final recent = userItems.length <= 5 ? userItems : userItems.sublist(userItems.length - 5);
+  final recent = userItems.length <= 5
+      ? userItems
+      : userItems.sublist(userItems.length - 5);
   final used = <UserItem>{};
   for (final it in prev.items) {
     if (it is! UserItem || !it.pending) continue;
@@ -656,6 +845,9 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       if (state.running) return state;
       final d = _open(state);
       d.running = true;
+      // omp picked the retry (or any new turn) up: its events own the
+      // transcript from here, so the optimistic chip hiding ends.
+      d.retried = false;
       return _close(d);
     case 'agent_end':
       final d = _open(state);
@@ -668,8 +860,14 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       // as confirmed.
       for (var i = 0; i < d.items.length; i++) {
         final it = d.items[i];
-        if (it is UserItem && it.pending && (it.note == 'steer-pending' || it.note == 'steer')) {
-          d.items[i] = it.copyWith(pending: false, stale: true, note: 'steer-pending');
+        if (it is UserItem &&
+            it.pending &&
+            (it.note == 'steer-pending' || it.note == 'steer')) {
+          d.items[i] = it.copyWith(
+            pending: false,
+            stale: true,
+            note: 'steer-pending',
+          );
         }
       }
       return _close(d);
@@ -680,10 +878,14 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
         for (final it in d.items)
           if (it is UserItem && it.pending)
             (it.note == 'steer-pending' || it.note == 'steer')
-                ? it.copyWith(pending: false, stale: true, note: 'steer-pending')
+                ? it.copyWith(
+                    pending: false,
+                    stale: true,
+                    note: 'steer-pending',
+                  )
                 : it.copyWith(pending: false)
           else
-            it
+            it,
       ];
       d.items
         ..clear()
@@ -691,8 +893,9 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       return _close(d);
     case 'prompt_result':
       if (!event.agentInvokedFalse) return state;
-      final i = state.items
-          .indexWhere((it) => it is UserItem && it.pending && it.text.trim().startsWith('/'));
+      final i = state.items.indexWhere(
+        (it) => it is UserItem && it.pending && it.text.trim().startsWith('/'),
+      );
       if (i < 0) return state;
       final d = _open(state);
       d.items[i] = (d.items[i] as UserItem).copyWith(pending: false);
@@ -700,18 +903,27 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
     case 'message_start':
     case 'message_update':
     case 'message_end':
-      final m = event.message ?? (event.type == 'message_update' ? event.partialMessage : null);
+      final m =
+          event.message ??
+          (event.type == 'message_update' ? event.partialMessage : null);
       if (m == null) return state;
-      final ame = event.type == 'message_update' ? event.assistantMessageEvent : null;
+      final ame = event.type == 'message_update'
+          ? event.assistantMessageEvent
+          : null;
       final ameType = strOf(ame ?? const {}, 'type');
       final d = _open(state);
-      _applyMessage(d, m, ctx,
-          messageId: event.messageId,
-          ending: event.type == 'message_end',
-          thinkingStreaming: ameType != null &&
-              ameType.startsWith('thinking_') &&
-              ameType != 'thinking_end',
-          fallback: 'anon');
+      _applyMessage(
+        d,
+        m,
+        ctx,
+        messageId: event.messageId,
+        ending: event.type == 'message_end',
+        thinkingStreaming:
+            ameType != null &&
+            ameType.startsWith('thinking_') &&
+            ameType != 'thinking_end',
+        fallback: 'anon',
+      );
       return _close(d);
     case 'tool_execution_start':
       final d = _open(state);
@@ -738,7 +950,9 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
         args: event.args,
         intent: null,
         messageKey: null,
-        output: event.raw.containsKey('partialResult') ? resultText(event.partialResult) : null,
+        output: event.raw.containsKey('partialResult')
+            ? resultText(event.partialResult)
+            : null,
         status: null,
         details: null,
         startedAt: at,
@@ -766,7 +980,9 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       return _close(d);
     case 'extension_ui_request':
       if (isBlockingUiMap(event.raw)) {
-        if (state.pendingUi.any((u) => u.id == (event.raw['id'] ?? ''))) return state;
+        if (state.pendingUi.any((u) => u.id == (event.raw['id'] ?? ''))) {
+          return state;
+        }
         final d = _open(state);
         d.pendingUi.add(UiRequest(event.raw));
         return _close(d);
@@ -774,16 +990,22 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       if (event.raw['method'] == 'notify') {
         // TS: ev.message || ev.title — an empty message falls through to title.
         final message = strOf(event.raw, 'message');
-        final text = (message != null && message.isNotEmpty) ? message : (event.title ?? '');
+        final text = (message != null && message.isNotEmpty)
+            ? message
+            : (event.title ?? '');
         final key = 'ui:${event.raw['id'] ?? ''}';
-        if (text.isEmpty || state.items.any((it) => it.messageKey == key)) return state;
+        if (text.isEmpty || state.items.any((it) => it.messageKey == key)) {
+          return state;
+        }
         final d = _open(state);
-        d.items.add(NoticeItem(
-          id: 'n:$key',
-          messageKey: key,
-          level: event.notifyType == 'error' ? 'error' : 'info',
-          text: text,
-        ));
+        d.items.add(
+          NoticeItem(
+            id: 'n:$key',
+            messageKey: key,
+            level: event.notifyType == 'error' ? 'error' : 'info',
+            text: text,
+          ),
+        );
         return _close(d);
       }
       return state;
@@ -795,8 +1017,9 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       return _close(d);
     case 'command_output':
       final d = _open(state);
-      final i = d.items
-          .indexWhere((it) => it is UserItem && it.pending && it.text.trim().startsWith('/'));
+      final i = d.items.indexWhere(
+        (it) => it is UserItem && it.pending && it.text.trim().startsWith('/'),
+      );
       final UserItem? typed = i >= 0 ? d.items[i] as UserItem : null;
       final item = CommandItem(
         id: typed?.id ?? _nextId(d, 'c'),
@@ -812,37 +1035,49 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
       return _close(d);
     case 'auto_compaction_start':
       final d = _open(state);
-      d.items.add(NoticeItem(
-        id: _nextId(d, 'n'),
-        level: 'info',
-        tag: 'compaction',
-        active: true,
-        text: 'Compacting context',
-      ));
+      d.items.add(
+        NoticeItem(
+          id: _nextId(d, 'n'),
+          level: 'info',
+          tag: 'compaction',
+          active: true,
+          text: 'Compacting context',
+        ),
+      );
       return _close(d);
     case 'auto_compaction_end':
       // TS: ev.errorMessage ? ... — an empty string is absent.
-      final hasError = event.errorMessage != null && event.errorMessage!.isNotEmpty;
+      final hasError =
+          event.errorMessage != null && event.errorMessage!.isNotEmpty;
       final text = hasError
           ? 'Compaction failed: ${event.errorMessage}'
           : event.aborted
-              ? 'Compaction stopped'
-              : 'Context compacted';
+          ? 'Compaction stopped'
+          : 'Context compacted';
       return _closeNotice(
-          state, 'compaction', hasError ? 'error' : 'info', text);
+        state,
+        'compaction',
+        hasError ? 'error' : 'info',
+        text,
+      );
     case 'auto_retry_start':
-      final of = (event.maxAttempts != null && event.maxAttempts != 0) ? ' of ${event.maxAttempts}' : '';
+      final of = (event.maxAttempts != null && event.maxAttempts != 0)
+          ? ' of ${event.maxAttempts}'
+          : '';
       final retryError = event.errorMessage;
-      final why =
-          (retryError != null && retryError.isNotEmpty) ? ': $retryError' : '';
+      final why = (retryError != null && retryError.isNotEmpty)
+          ? ': $retryError'
+          : '';
       final d = _open(state);
-      d.items.add(NoticeItem(
-        id: _nextId(d, 'n'),
-        level: 'info',
-        tag: 'retry',
-        active: true,
-        text: 'Retrying, attempt ${event.attempt ?? 1}$of$why',
-      ));
+      d.items.add(
+        NoticeItem(
+          id: _nextId(d, 'n'),
+          level: 'info',
+          tag: 'retry',
+          active: true,
+          text: 'Retrying, attempt ${event.attempt ?? 1}$of$why',
+        ),
+      );
       return _close(d);
     case 'auto_retry_end':
       return event.success
@@ -853,7 +1088,8 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
               'error',
               (event.finalError != null && event.finalError!.isNotEmpty)
                   ? 'Gave up retrying: ${event.finalError!}'
-                  : 'Gave up retrying');
+                  : 'Gave up retrying',
+            );
     case 'model_changed':
       final name = _modelName(event.raw['model']);
       return name != null ? _pushNotice(state, 'info', 'Model: $name') : state;
@@ -868,7 +1104,11 @@ TranscriptState onEvent(TranscriptState state, OmpEvent event, int? at) {
           ? _pushNotice(state, event.level == 'error' ? 'error' : 'info', text)
           : state;
     case 'extension_error':
-      return _pushNotice(state, 'error', 'Extension error: ${event.error ?? 'unknown'}');
+      return _pushNotice(
+        state,
+        'error',
+        'Extension error: ${event.error ?? 'unknown'}',
+      );
     default:
       // Unknown event types are ignored: omp adds them.
       return state;
@@ -893,7 +1133,12 @@ TranscriptState _pushNotice(TranscriptState state, String level, String text) {
   return _close(d);
 }
 
-TranscriptState _closeNotice(TranscriptState state, String tag, String level, String text) {
+TranscriptState _closeNotice(
+  TranscriptState state,
+  String tag,
+  String level,
+  String text,
+) {
   final d = _open(state);
   for (var i = d.items.length - 1; i >= 0; i--) {
     final it = d.items[i];
@@ -902,6 +1147,8 @@ TranscriptState _closeNotice(TranscriptState state, String tag, String level, St
       return _close(d);
     }
   }
-  d.items.add(NoticeItem(id: _nextId(d, 'n'), level: level, text: text, tag: tag));
+  d.items.add(
+    NoticeItem(id: _nextId(d, 'n'), level: level, text: text, tag: tag),
+  );
   return _close(d);
 }

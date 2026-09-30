@@ -52,14 +52,9 @@ void main() {
   testWidgets('the overflow button opens the same menu without selecting', (
     tester,
   ) async {
-    var retried = false;
     await pumpOmp(
       tester,
-      AssistantMessage(
-        item: _item('plain text'),
-        onInspect: (_) {},
-        onRetry: () => retried = true,
-      ),
+      AssistantMessage(item: _item('plain text'), onInspect: (_) {}),
     );
 
     await tester.tap(find.byTooltip('Message actions'));
@@ -67,12 +62,13 @@ void main() {
 
     expect(
       find.byType(PopupMenuItem<String>),
-      findsNWidgets(3),
-      reason: 'Copy, Inspect, Retry turn',
+      findsNWidgets(2),
+      reason: 'Copy, Inspect (fork is a user-bubble action)',
     );
-    await tester.tap(find.text('Retry turn'));
+    expect(find.text('Fork from here'), findsNothing);
+    await tester.tap(find.text('Copy'));
     await tester.pumpAndSettle();
-    expect(retried, isTrue);
+    expect(find.byType(PopupMenuItem<String>), findsNothing);
   });
 
   testWidgets('no overflow affordance while the message is streaming', (

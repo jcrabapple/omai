@@ -28,6 +28,7 @@ import '../wire/wire.dart' show OmpEvent, UiRequest;
 import 'connection_notifier.dart';
 import 'reviewed_store.dart';
 import 'sessions_store.dart';
+import 'subagents_store.dart';
 
 enum SessionPhase { idle, loading, ready, gone, error }
 
@@ -347,6 +348,11 @@ class SessionController extends Notifier<SessionState> {
       unawaited(_loadCommands(env, gwId, gen));
       unawaited(_refreshStats(env, gwId, gen));
       unawaited(_refreshQueued(env, gwId, gen));
+      // Fresh roster for this session: clear, then seed the REST registry
+      // snapshot; live frames keep it current while the session is open
+      // (web: active.close clears, open seeds via GET /subagents).
+      ref.read(subagentsStoreProvider.notifier).clear();
+      unawaited(_seedSubagents(env, gwId, gen));
     } catch (e) {
       if (gen != _generation || !ref.mounted) return;
       if (e is GatewayError && e.status == 404) {
@@ -580,6 +586,9 @@ class SessionController extends Notifier<SessionState> {
                 DateTime.now().millisecondsSinceEpoch,
           ),
         );
+      case 'subagent_progress':
+      case 'subagent_lifecycle':
+        ref.read(subagentsStoreProvider.notifier).feed(event);
       case 'available_commands_update':
         final cmds = event.raw['commands'];
         if (cmds is List) _applyCommands(cmds);
@@ -712,6 +721,17 @@ class SessionController extends Notifier<SessionState> {
       if (cmds is List) _applyCommands(cmds);
     } catch (_) {
       // the palette works without slash commands
+    }
+  }
+
+  /// Registry snapshot for the subagents roster; optional, like stats.
+  Future<void> _seedSubagents(SessionEnv env, String gwId, int gen) async {
+    try {
+      final r = await env.client.subagents(gwId);
+      if (gen != _generation || !ref.mounted) return;
+      ref.read(subagentsStoreProvider.notifier).seed(r);
+    } catch (_) {
+      // the roster fills from live frames anyway
     }
   }
 

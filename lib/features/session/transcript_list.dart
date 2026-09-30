@@ -13,19 +13,135 @@
 // user is reading. Sending a message always re-follows (web: the lastSentId
 // effect).
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../api/errors.dart';
+import '../../composer/drafts.dart';
+import '../../state/connection_notifier.dart';
+import '../../state/session_controller.dart';
+import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
 import '../../transcript/blocks.dart';
+import '../../transcript/fork.dart';
 import '../../transcript/items.dart' show UserItem;
 import '../../widgets/items/inspector_sheet.dart' show showInspectorSheet;
 import '../../widgets/transcript_item.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../state/session_controller.dart';
+import 'session_screen.dart';
 
 const _followPx = 120.0;
+
+/// Fork the session at a settled user message: history strictly before it
+/// becomes a new session and the message lands in the new session's composer
+/// for a re-send. Ported from web/src/lib/actions.svelte.ts forkFromItem /
+/// forkAt.
+Future<void> forkFromItem(
+  BuildContext context,
+  WidgetRef ref,
+  SessionState state,
+  UserItem item,
+) async {
+  final gwId = state.gwId;
+  // Same guard as the web menu: no fork while a turn runs or the message
+  // could not have an entry (pending, failed, empty).
+  if (state.running || !forkable(item)) return;
+
+  void snack(String message) =>
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(message)));
+
+  final env = await ref.read(sessionEnvProvider.future);
+
+  // The live user entries, oldest first. A fetch failure means no fork.
+  List<SessionEntry> entries;
+  try {
+    final res = await env.client.entries(gwId);
+    final rows = (res['entries'] as List?)?.cast<Object?>() ?? const [];
+    entries = [for (final row in rows) ?SessionEntry.fromJson(row)];
+  } catch (_) {
+    snack('Could not load the session entries');
+    return;
+  }
+
+  final entry = entryForItem(item, entries);
+  if (entry == null) {
+    // The live history diverged (compacted, another device): do not fork
+    // blind (web: forkStaleToast).
+    snack('This session has changed since it loaded');
+    return;
+  }
+
+  Map<String, Object?> res;
+  try {
+    res = await env.client.fork(gwId, entry.entryId);
+  } on GatewayError catch (e) {
+    // 409 while a turn runs or the session compacts; 422 is the gateway's
+    // stale-entry verdict, and a 400 mentioning the entry or the branch is
+    // omp losing the same race between validation and branch.
+    if (e.status == 409) {
+      snack('The session is busy');
+    } else if (e.status == 422 ||
+        (e.status == 400 && RegExp('entr|branch').hasMatch(e.message))) {
+      snack('This session has changed since it loaded');
+    } else {
+      snack('Could not fork the session');
+    }
+    return;
+  } catch (_) {
+    snack('Could not fork the session');
+    return;
+  }
+  final newGwId = res['gwId'];
+  if (newGwId is! String || newGwId.isEmpty) {
+    snack('Could not fork the session');
+    return;
+  }
+
+  // The caller's text wins (it matches what the user sees); the gateway's
+  // text covers a fork whose item carries none.
+  final gatewayText = res['text'];
+  final seed = item.text.trim().isNotEmpty
+      ? item.text
+      : (gatewayText is String && gatewayText.isNotEmpty ? gatewayText : null);
+
+  // omp forks at the LIVE history. A failed or diverging prefix check must
+  // not strand the user on the now-stopped parent, so always open the child
+  // and surface any doubt as a note there.
+  String? note;
+  final expected = userTextsBefore(state.transcript.items, item);
+  if (expected != null) {
+    try {
+      final msgs = await env.client.messages(newGwId);
+      final rows = (msgs['messages'] as List?)?.cast<Object?>() ?? const [];
+      if (prefixMissing(expected, userTexts(rows))) {
+        note = 'The forked session is missing part of this history';
+      }
+    } catch (_) {
+      note = 'Could not verify the forked session history';
+    }
+  }
+
+  // Seed the new session's draft before navigating so the composer loads it.
+  if (seed != null) {
+    final connId = ref.read(connectionNotifierProvider).active?.id ?? '';
+    await saveDraft(ref.read(draftKvProvider), connId, newGwId, seed);
+  }
+
+  // The parent process was stopped server-side; keeping the row would ghost
+  // the rail until the next poll.
+  ref.read(sessionsStoreProvider.notifier).remove(gwId);
+  unawaited(ref.read(sessionsStoreProvider.notifier).refresh());
+
+  if (!context.mounted) return;
+  Navigator.of(context).pushReplacement(
+    MaterialPageRoute<void>(builder: (_) => SessionScreen(gwId: newGwId)),
+  );
+  snack(note ?? 'Forked to new session');
+}
 
 class TranscriptList extends ConsumerStatefulWidget {
   const TranscriptList({super.key, required this.state});
@@ -116,9 +232,12 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
   /// retry is in flight is ignored, and the button disables via
   /// `retryingSends` in the state.
   void _retrySend(UserItem item) {
-    final localId = item.localId ??
+    final localId =
+        item.localId ??
         (item.id.startsWith('local:') ? item.id.substring(6) : item.id);
-    ref.read(sessionControllerProvider(widget.state.gwId).notifier).retrySend(localId);
+    ref
+        .read(sessionControllerProvider(widget.state.gwId).notifier)
+        .retrySend(localId);
   }
 
   void _onScroll() {
@@ -248,17 +367,20 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
                   key: ValueKey('view:${b.key}'),
                   item: (b as ItemBlock).item,
                   callbacks: TranscriptItemCallbacks(
-                    onInspect: (raw) =>
-                        showInspectorSheet(context, raw: raw),
-                    // Retry the last turn via omp's /retry command, only
-                    // offered while the session is idle.
-                    onRetryTurn: state.running
-                        ? null
-                        : () => ref
-                            .read(sessionControllerProvider(
-                                widget.state.gwId)
-                            .notifier)
-                            .send('/retry'),
+                    onInspect: (raw) => showInspectorSheet(context, raw: raw),
+                    // Fork at a settled user message: hidden while a turn
+                    // runs and for pending/failed/empty bubbles.
+                    onFork:
+                        b.item is UserItem &&
+                            !state.running &&
+                            forkable(b.item as UserItem)
+                        ? () => forkFromItem(
+                            context,
+                            ref,
+                            state,
+                            b.item as UserItem,
+                          )
+                        : null,
                     onRetrySend:
                         b.item is UserItem &&
                             (b.item as UserItem).failed == true
@@ -266,9 +388,10 @@ class _TranscriptListState extends ConsumerState<TranscriptList> {
                         : null,
                     retryingSend:
                         b.item is UserItem &&
-                            state.retryingSends.contains(
-                                (b.item as UserItem).localId ??
-                                    (b.item as UserItem).id),
+                        state.retryingSends.contains(
+                          (b.item as UserItem).localId ??
+                              (b.item as UserItem).id,
+                        ),
                   ),
                 ),
         ),

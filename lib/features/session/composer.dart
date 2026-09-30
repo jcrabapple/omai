@@ -21,6 +21,8 @@ import '../../composer/slash.dart';
 import '../../state/connection_notifier.dart';
 import '../../state/session_controller.dart';
 import '../../theme/tokens.dart';
+import '../../transcript/reducer.dart'
+    show LocalRetryInput, lastTurnFailure, reduce;
 import '../../transcript/send.dart' show sendPlan, PromptMode;
 import 'image_tray.dart';
 import 'slash_menu.dart';
@@ -79,6 +81,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
 
   bool _sending = false;
   bool _draftLoaded = false;
+
+  /// The backend retry (POST /retry) is in flight: the chip shows progress
+  /// and cannot be tapped twice.
+  bool _retryingTurn = false;
 
   // Attached images (E2b): tray contents, id source, and the current
   // validation problem shown inline under the tray.
@@ -169,11 +175,13 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         declaredMime: declared,
       );
       if (problem != null) break;
-      added.add(AttachedImage(
-        id: _nextImageId++,
-        bytes: bytes,
-        mimeType: sniffImageMime(bytes)!,
-      ));
+      added.add(
+        AttachedImage(
+          id: _nextImageId++,
+          bytes: bytes,
+          mimeType: sniffImageMime(bytes)!,
+        ),
+      );
     }
     if (!mounted) return;
     setState(() {
@@ -202,12 +210,14 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Photo library'),
-              onTap: () => Navigator.of(sheetContext).pop(ImagePickSource.gallery),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(ImagePickSource.gallery),
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
               title: const Text('Camera'),
-              onTap: () => Navigator.of(sheetContext).pop(ImagePickSource.camera),
+              onTap: () =>
+                  Navigator.of(sheetContext).pop(ImagePickSource.camera),
             ),
           ],
         ),
@@ -282,6 +292,34 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     }
   }
 
+  /// Retry the last failed TURN through the gateway (POST /retry, omp's
+  /// abort_retry). Only backend turn failures get here (lastTurnFailure); a
+  /// client-side failed send keeps its per-bubble Retry. On success the chip
+  /// hides optimistically (LocalRetryInput) until omp starts the new turn.
+  Future<void> _retryTurn() async {
+    if (_retryingTurn) return;
+    setState(() => _retryingTurn = true);
+    try {
+      final env = await ref.read(sessionEnvProvider.future);
+      await env.client.retry(widget.gwId);
+      final provider = sessionControllerProvider(widget.gwId);
+      final s = ref.read(provider);
+      // The controller's _dispatch is private; the retry is a pure
+      // transcript-state flag, so it is applied here (web: `retried`).
+      // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+      ref.read(provider.notifier).state = s.copyWith(
+        transcript: reduce(s.transcript, const LocalRetryInput()),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)
+            ?.showSnackBar(const SnackBar(content: Text('Could not retry')));
+      }
+    } finally {
+      if (mounted) setState(() => _retryingTurn = false);
+    }
+  }
+
   // --------------------------------------------------------------- build
 
   @override
@@ -295,8 +333,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
         return;
       }
       _failedSend = null;
-      final unchanged =
-          _text.text == failed.text && _matchesSnapshot(failed);
+      final unchanged = _text.text == failed.text && _matchesSnapshot(failed);
       if (!unchanged) return;
       setState(() {
         _text.clear();
@@ -311,9 +348,21 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final ended =
         state.phase == SessionPhase.gone || state.info?.exited == true;
     final enabled = state.phase == SessionPhase.ready && !ended;
-    final canSend = enabled &&
+    final canSend =
+        enabled &&
         !_sending &&
         (_text.text.trim().isNotEmpty || _images.isNotEmpty);
+    // Web Composer canRetry: ready, not streaming, not ended, the last turn
+    // ended in a BACKEND failure (never a client-side failed send), and no
+    // retry is already waiting for omp to pick it up.
+    final failure = lastTurnFailure(state.transcript);
+    final canRetry =
+        enabled &&
+        !streaming &&
+        !_sending &&
+        !_retryingTurn &&
+        failure != null &&
+        !state.transcript.retried;
     final plan = sendPlan(streaming);
 
     final query = _dismissedFor == _text.text ? null : slashQuery(_text.text);
@@ -387,6 +436,36 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                   ],
                 ),
               ),
+            // Backend turn failure: a slim Retry chip above the field (web
+            // Composer's canRetry chip).
+            if (canRetry)
+              Padding(
+                padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _retryTurn,
+                    icon: _retryingTurn
+                        ? SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: tokens.accent,
+                            ),
+                          )
+                        : Icon(Icons.refresh, size: 16, color: tokens.accent),
+                    label: Text(
+                      _retryingTurn ? 'Retrying' : 'Retry turn',
+                      style: TextStyle(
+                        color: tokens.accent,
+                        fontSize: OmpMetrics.fsSm,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             // Attached images: a 56dp thumbnail tray with per-thumb remove,
             // and any validation problem inline under it (not a SnackBar).
             if (_images.isNotEmpty) ...[
@@ -453,20 +532,20 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                       // keyboards): validated like a picked image.
                       contentInsertionConfiguration:
                           ContentInsertionConfiguration(
-                        allowedMimeTypes: const [
-                          'image/png',
-                          'image/jpeg',
-                          'image/webp',
-                          'image/gif',
-                        ],
-                        onContentInserted: (content) {
-                          final data = content.data;
-                          if (data == null) return;
-                          unawaited(
-                            _addImageBytes([(data, content.mimeType)]),
-                          );
-                        },
-                      ),
+                            allowedMimeTypes: const [
+                              'image/png',
+                              'image/jpeg',
+                              'image/webp',
+                              'image/gif',
+                            ],
+                            onContentInserted: (content) {
+                              final data = content.data;
+                              if (data == null) return;
+                              unawaited(
+                                _addImageBytes([(data, content.mimeType)]),
+                              );
+                            },
+                          ),
                       decoration: InputDecoration(
                         // The rounded container around the field draws the one outline
                         // (and the focus colour). The app theme gives every field its own

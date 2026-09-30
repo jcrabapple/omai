@@ -15,9 +15,11 @@ import '../../native/keepalive.dart';
 import '../../native/method_channel_bridge.dart';
 import '../../state/session_controller.dart';
 import '../../state/sessions_store.dart';
+import '../../state/subagents_store.dart';
 import '../../theme/tokens.dart';
 import '../../transcript/items.dart';
 import 'approval_panel.dart';
+import 'agents_sheet.dart';
 import 'background_work_banner.dart';
 import 'composer.dart';
 import 'plan_panel.dart';
@@ -45,10 +47,14 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
   // retry replaces the notifier, so it is read at call time instead.)
   SessionsStore? _sessions;
 
+  // Same: the roster is a plain global notifier, safe to hold.
+  SubagentsStore? _subagents;
+
   @override
   void initState() {
     super.initState();
     _sessions = ref.read(sessionsStoreProvider.notifier);
+    _subagents = ref.read(subagentsStoreProvider.notifier);
     _keepalive = KeepaliveCoordinator(
       surface: const MethodChannelKeepaliveSurface(),
       onPause: () => _readController()?.pause(),
@@ -113,6 +119,10 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
     _lifecycle?.dispose();
     KeepaliveRegistry.detach(widget.gwId);
     _keepalive.dispose();
+    // The subagents roster belongs to the open session: popping (or
+    // disposing) the screen clears it so nothing leaks into the next one.
+    // Deferred: modifying a provider inside dispose throws in Riverpod 3.
+    scheduleMicrotask(() => _subagents?.clear());
     // Popping (or disposing) the screen clears the open-session marker.
     _sessions?.setOpenSession(null);
     super.dispose();
@@ -183,6 +193,8 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
                     // Not awaited: the flow pops the screen on success.
                     unawaited(confirmAndStopSession(context, ref, widget.gwId));
                   },
+                  onShowAgents: () =>
+                      unawaited(showAgentsSheet(context, widget.gwId)),
                 ),
               ),
             // Blocking dialogs take over the composer slot; non-blocking

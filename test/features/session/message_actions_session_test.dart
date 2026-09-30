@@ -207,7 +207,7 @@ void main() {
     expect(find.textContaining('"role": "assistant"'), findsOneWidget);
   });
 
-  testWidgets('Retry turn sends /retry when the session is idle', (
+  testWidgets('no Retry turn item: backend retry lives in the composer chip', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(900, 1600);
@@ -218,14 +218,11 @@ void main() {
     await _pumpReady(tester, container);
 
     await _openMessageMenu(tester);
-    expect(find.text('Retry turn'), findsOneWidget);
-    await tester.tap(find.text('Retry turn'));
-    await tester.pump();
-    await tester.pump();
-    await tester.pump();
+    expect(find.text('Retry turn'), findsNothing);
 
-    final body = gateway.bodies['/api/sessions/abc/prompt'];
-    expect(body is Map ? body['message'] : null, '/retry');
+    // The old '/retry' prompt hack is gone: a healthy history never sends
+    // anything, and retrying is POST /retry now.
+    expect(gateway.bodies['/api/sessions/abc/prompt'], isNull);
   });
 
   testWidgets('no Retry turn while a turn is running', (tester) async {
