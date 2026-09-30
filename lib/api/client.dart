@@ -285,6 +285,61 @@ class GatewayClient {
   );
 
   /// Dialogs omp is blocked on: `{pending: [...]}`.
+  // ------------------------------------------------ phase-3 gateway routes
+  // Raw maps: each feature parses its own shapes (see docs/API.md).
+
+  String _sid(String id) => '/api/sessions/${Uri.encodeComponent(id)}';
+
+  /// Re-run the last failed turn (omp abort_retry). 400 when there is
+  /// nothing to retry.
+  Future<Map<String, dynamic>> retry(String id) =>
+      _send('POST', '${_sid(id)}/retry');
+
+  /// `{entries: [{entryId, role, timestamp}]}`; user rows are fork targets.
+  Future<Map<String, dynamic>> entries(String id) =>
+      _send('GET', '${_sid(id)}/entries');
+
+  /// Branch at a user entry: `{gwId, forkedFrom, text}`. 409 while busy,
+  /// 422 for a non-user/unknown entry.
+  Future<Map<String, dynamic>> fork(String id, String entryId) =>
+      _send('POST', '${_sid(id)}/fork', body: {'entryId': entryId});
+
+  /// One directory of the session cwd for @-mentions:
+  /// `{entries: [{name, path, isDir, size}]}`.
+  Future<Map<String, dynamic>> files(String id, {String prefix = ''}) =>
+      _send('GET', '${_sid(id)}/files', query: {'prefix': prefix});
+
+  /// `{subagents: [...]}` registry snapshot.
+  Future<Map<String, dynamic>> subagents(String id) =>
+      _send('GET', '${_sid(id)}/subagents');
+
+  /// One subagent's transcript page: `{messages, nextByte, reset,
+  /// sessionFile}`.
+  Future<Map<String, dynamic>> subagentMessages(
+    String id,
+    String subagentId, {
+    int? from,
+  }) => _send(
+    'GET',
+    '${_sid(id)}/subagents/${Uri.encodeComponent(subagentId)}/messages',
+    query: {if (from != null) 'from': '$from'},
+  );
+
+  /// Usage ledger aggregates: `{days, totals, perDay, perModel}`.
+  Future<Map<String, dynamic>> ledger({
+    int days = 30,
+    String? model,
+    String? provider,
+  }) => _send(
+    'GET',
+    '/api/ledger',
+    query: {'days': '$days', 'model': ?model, 'provider': ?provider},
+  );
+
+  /// Per-session rollup: `{days, sessions: [...]}`.
+  Future<Map<String, dynamic>> ledgerSessions({int days = 30}) =>
+      _send('GET', '/api/ledger/sessions', query: {'days': '$days'});
+
   Future<List<Map<String, Object?>>> pendingUi(String id) async {
     final json = await _send(
       'GET',

@@ -636,4 +636,69 @@ void main() {
       });
     }
   });
+
+  group('phase-3 routes', () {
+    Future<http.Request> capture(
+      Future<Object?> Function(GatewayClient c) call,
+    ) async {
+      late http.Request seen;
+      final c = clientWith((req) async {
+        seen = req;
+        return http.Response(
+          '{}',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      await call(c);
+      return seen;
+    }
+
+    test('retry, entries, fork', () async {
+      var r = await capture((c) => c.retry('a b'));
+      expect(r.method, 'POST');
+      expect(r.url.path, '/api/sessions/a%20b/retry');
+      r = await capture((c) => c.entries('s1'));
+      expect(r.url.path, '/api/sessions/s1/entries');
+      r = await capture((c) => c.fork('s1', 'e9'));
+      expect(r.method, 'POST');
+      expect(r.url.path, '/api/sessions/s1/fork');
+      expect(jsonDecode(r.body), {'entryId': 'e9'});
+    });
+
+    test('files always sends prefix, even empty', () async {
+      var r = await capture((c) => c.files('s1'));
+      expect(r.url.path, '/api/sessions/s1/files');
+      expect(r.url.queryParameters, {'prefix': ''});
+      r = await capture((c) => c.files('s1', prefix: 'lib/'));
+      expect(r.url.queryParameters, {'prefix': 'lib/'});
+    });
+
+    test('subagents and paged subagent messages', () async {
+      var r = await capture((c) => c.subagents('s1'));
+      expect(r.url.path, '/api/sessions/s1/subagents');
+      r = await capture((c) => c.subagentMessages('s1', 'x/y'));
+      expect(r.url.path, '/api/sessions/s1/subagents/x%2Fy/messages');
+      expect(r.url.queryParameters, isEmpty);
+      r = await capture((c) => c.subagentMessages('s1', 'x', from: 120));
+      expect(r.url.queryParameters, {'from': '120'});
+    });
+
+    test('ledger query omits unset filters', () async {
+      var r = await capture((c) => c.ledger());
+      expect(r.url.path, '/api/ledger');
+      expect(r.url.queryParameters, {'days': '30'});
+      r = await capture(
+        (c) => c.ledger(days: 7, model: 'glm', provider: 'nous'),
+      );
+      expect(r.url.queryParameters, {
+        'days': '7',
+        'model': 'glm',
+        'provider': 'nous',
+      });
+      r = await capture((c) => c.ledgerSessions(days: 90));
+      expect(r.url.path, '/api/ledger/sessions');
+      expect(r.url.queryParameters, {'days': '90'});
+    });
+  });
 }
