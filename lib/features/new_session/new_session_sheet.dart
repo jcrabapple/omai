@@ -40,14 +40,28 @@ class LastCwd extends Notifier<String> {
 
 final lastCwdProvider = NotifierProvider<LastCwd, String>(LastCwd.new);
 
+/// Folders the gateway reports as deleted (saved entries with
+/// `cwdExists: false`).
+Set<String> missingCwds(List<SavedSession> saved) => {
+  for (final s in saved)
+    if (s.cwd != null && s.cwdExists == false) s.cwd!,
+};
+
 /// Recent working directories for the chip row: live sessions first (the
 /// store keeps them newest-first), then saved ones, deduped, at most five.
+/// Only real folders that still exist: a saved entry the gateway marks
+/// `cwdExists: false` is skipped (and so is any live session in that folder),
+/// and so is one with no recorded cwd, whose `cwdFolder` is omp's mangled
+/// directory name rather than a path. A missing `cwdExists` (older gateway)
+/// counts as unknown and stays.
 List<String> recentCwds(List<SessionInfo> live, List<SavedSession> saved) {
-  final seen = <String>{};
+  final missing = missingCwds(saved);
+  final seen = <String>{...missing};
   final out = <String>[];
   for (final cwd in [
     ...live.map((s) => s.cwd),
-    ...saved.map((s) => s.displayCwd),
+    for (final s in saved)
+      if (s.cwd != null) s.cwd!,
   ]) {
     if (cwd.isEmpty || !seen.add(cwd)) continue;
     out.add(cwd);
@@ -103,6 +117,10 @@ class NewSessionSheet extends ConsumerStatefulWidget {
 
 class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
   late final TextEditingController _cwd;
+
+  /// What the folder field was prefilled with; replaced only while the user
+  /// hasn't edited it.
+  late String _prefilled;
   CatalogModel? _model;
   String _thinking = '';
   String _approval = 'yolo';
@@ -112,7 +130,19 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
   @override
   void initState() {
     super.initState();
-    _cwd = TextEditingController(text: ref.read(lastCwdProvider));
+    // The remembered folder may have been deleted since; start from the
+    // default instead of prefilling a path the create would fail on. The
+    // sessions list may still be loading, so this is re-checked in build.
+    _prefilled = ref.read(lastCwdProvider);
+    _cwd = TextEditingController(text: _prefilled);
+    _dropMissingPrefill(ref.read(sessionsStoreProvider).saved);
+  }
+
+  void _dropMissingPrefill(List<SavedSession> saved) {
+    if (_cwd.text != _prefilled || _prefilled == defaultCwd) return;
+    if (!missingCwds(saved).contains(_prefilled)) return;
+    _prefilled = defaultCwd;
+    _cwd.text = defaultCwd;
   }
 
   @override
@@ -186,6 +216,10 @@ class _NewSessionSheetState extends ConsumerState<NewSessionSheet> {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
+    ref.listen(
+      sessionsStoreProvider,
+      (_, next) => _dropMissingPrefill(next.saved),
+    );
     final sessions = ref.watch(sessionsStoreProvider);
     final suggestions = recentCwds(sessions.live, sessions.saved);
     final current = _model == null

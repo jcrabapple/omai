@@ -17,7 +17,8 @@ List<Map<String, Object?>> rawMapList(Object? v) {
   final list = asList(v) ?? const [];
   return [
     for (final e in list)
-      if (asMap(e) != null) Map<String, Object?>.from(e as Map<String, dynamic>),
+      if (asMap(e) != null)
+        Map<String, Object?>.from(e as Map<String, dynamic>),
   ];
 }
 
@@ -147,8 +148,9 @@ class SessionInfo {
       uptimeSec: dbl(m['uptimeSec']) ?? 0,
       subscribers: intVal(m['subscribers']) ?? 0,
       messageCount: intVal(m['messageCount']) ?? 0,
-      contextUsage:
-          asMap(m['contextUsage']) == null ? null : ContextUsage.fromJson(m['contextUsage']),
+      contextUsage: asMap(m['contextUsage']) == null
+          ? null
+          : ContextUsage.fromJson(m['contextUsage']),
       lastEventSeq: intVal(m['lastEventSeq']) ?? 0,
       pendingUi: rawMapList(m['pendingUi']),
       alreadyLive: boolVal(m['alreadyLive']) ?? false,
@@ -199,6 +201,7 @@ class SavedSession {
     required this.sizeBytes,
     required this.cwdFolder,
     required this.cwd,
+    this.cwdExists,
     required this.title,
     required this.running,
   });
@@ -211,6 +214,7 @@ class SavedSession {
       sizeBytes: intVal(m['sizeBytes']) ?? 0,
       cwdFolder: str(m['cwdFolder']) ?? '',
       cwd: str(m['cwd']),
+      cwdExists: boolVal(m['cwdExists']),
       title: str(m['title']) ?? '',
       running: boolVal(m['running']) ?? false,
     );
@@ -221,6 +225,10 @@ class SavedSession {
   final int sizeBytes;
   final String cwdFolder;
   final String? cwd;
+
+  /// Whether [cwd] still exists on the gateway host. Null when unknown: no
+  /// cwd recorded, or a gateway older than the field (docs/API.md).
+  final bool? cwdExists;
   final String title;
   final bool running;
 
@@ -236,8 +244,14 @@ class SessionsList {
     final live = asList(m['live']) ?? const [];
     final saved = asList(m['saved']) ?? const [];
     return SessionsList(
-      live: [for (final e in live) if (asMap(e) != null) SessionInfo.fromJson(e)],
-      saved: [for (final e in saved) if (asMap(e) != null) SavedSession.fromJson(e)],
+      live: [
+        for (final e in live)
+          if (asMap(e) != null) SessionInfo.fromJson(e),
+      ],
+      saved: [
+        for (final e in saved)
+          if (asMap(e) != null) SavedSession.fromJson(e),
+      ],
     );
   }
 
@@ -272,7 +286,9 @@ class CatalogModel {
       contextWindow: intVal(m['contextWindow']) ?? 0,
       maxTokens: intVal(m['maxTokens']) ?? 0,
       reasoning: boolVal(m['reasoning']) ?? false,
-      thinking: thinking == null ? null : [for (final t in thinking) str(t) ?? ''],
+      thinking: thinking == null
+          ? null
+          : [for (final t in thinking) str(t) ?? ''],
       input: [for (final t in input) str(t) ?? ''],
       cost: ModelCost.fromJson(m['cost']),
     );
@@ -299,7 +315,10 @@ class CatalogModels {
     final m = asMap(json) ?? const {};
     final list = asList(m['models']) ?? const [];
     return CatalogModels(
-      models: [for (final e in list) if (asMap(e) != null) CatalogModel.fromJson(e)],
+      models: [
+        for (final e in list)
+          if (asMap(e) != null) CatalogModel.fromJson(e),
+      ],
     );
   }
 

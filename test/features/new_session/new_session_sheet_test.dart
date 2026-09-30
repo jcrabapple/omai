@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:ohmypi/api/client.dart';
+import 'package:ohmypi/api/models.dart';
 import 'package:ohmypi/app/app.dart';
 import 'package:ohmypi/composer/drafts.dart';
 import 'package:ohmypi/features/new_session/new_session_sheet.dart';
@@ -52,9 +53,16 @@ class MemoryPrefs implements ConnectionPrefs {
 }
 
 class FakeGateway {
-  FakeGateway({this.createStatus = 200, this.createBody});
+  FakeGateway({
+    this.createStatus = 200,
+    this.createBody,
+    this.saved = const [],
+  });
   int createStatus;
   Map<String, Object?>? createBody;
+
+  /// Saved entries served by GET /api/sessions.
+  final List<Map<String, Object?>> saved;
   final List<Object?> bodies = [];
 
   http.Client client() => MockClient((req) async {
@@ -73,7 +81,7 @@ class FakeGateway {
         'live': [
           {'gwId': 'live-1', 'cwd': '/work/prompter'},
         ],
-        'saved': const [],
+        'saved': saved,
       });
     }
     if (req.url.path.endsWith('/messages')) {
@@ -379,4 +387,94 @@ void main() {
       expect(node.flagsCollection.isChecked, CheckedState.isTrue);
     },
   );
+
+  Map<String, Object?> savedEntry(
+    String? cwd, {
+    bool? exists,
+    String folder = 'x',
+  }) => {
+    'file': '/sessions/$folder.jsonl',
+    'mtime': 1,
+    'sizeBytes': 1,
+    'cwdFolder': '--mangled-$folder--',
+    'cwd': cwd,
+    'cwdExists': ?exists,
+    'title': 't',
+    'running': false,
+  };
+
+  testWidgets('recent folder chips skip folders that no longer exist', (
+    tester,
+  ) async {
+    final gateway = FakeGateway(
+      saved: [
+        savedEntry('/work/gone-e2e', exists: false, folder: 'a'),
+        savedEntry('/work/kept', exists: true, folder: 'b'),
+        // Older gateway: no cwdExists key -> unknown -> kept.
+        savedEntry('/work/unknown', folder: 'c'),
+        // No recorded cwd: cwdFolder is omp's mangled name, not a path.
+        savedEntry(null, folder: 'd'),
+      ],
+    );
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    expect(find.text('prompter'), findsOneWidget); // live session
+    expect(find.text('kept'), findsOneWidget);
+    expect(find.text('unknown'), findsOneWidget);
+    expect(find.text('gone-e2e'), findsNothing);
+    expect(find.textContaining('mangled'), findsNothing);
+  });
+
+  test('recentCwds drops a live session in a deleted folder too', () {
+    final live = [
+      SessionInfo.fromJson({'gwId': 'l1', 'cwd': '/work/gone'}),
+      SessionInfo.fromJson({'gwId': 'l2', 'cwd': '/work/here'}),
+    ];
+    final saved = [
+      SavedSession.fromJson(savedEntry('/work/gone', exists: false)),
+    ];
+    expect(recentCwds(live, saved), ['/work/here']);
+  });
+
+  testWidgets(
+    'a remembered folder that was deleted falls back to the default',
+    (tester) async {
+      final gateway = FakeGateway(
+        saved: [savedEntry('/work/gone-e2e', exists: false)],
+      );
+      final container = _container(gateway);
+      addTearDown(container.dispose);
+      container.read(lastCwdProvider.notifier).set('/work/gone-e2e');
+      await _pump(tester, container);
+
+      // Check the field's actual text: its hint is also the default folder.
+      final field = tester.widget<TextField>(find.byType(TextField).first);
+      expect(field.controller!.text, defaultCwd);
+    },
+  );
+
+  test('recentCwds keeps an unknown folder and skips an uncaptured cwd', () {
+    final saved = [
+      SavedSession.fromJson(savedEntry('/work/unknown')),
+      SavedSession.fromJson(savedEntry(null, folder: 'z')),
+    ];
+    expect(recentCwds(const [], saved), ['/work/unknown']);
+  });
+
+  testWidgets('a folder the user typed is never replaced', (tester) async {
+    final gateway = FakeGateway(
+      saved: [savedEntry('/work/gone-e2e', exists: false)],
+    );
+    final container = _container(gateway);
+    addTearDown(container.dispose);
+    await _pump(tester, container);
+
+    await tester.enterText(find.byType(TextField).first, '/work/gone-e2e');
+    await container.read(sessionsStoreProvider.notifier).refresh();
+    await tester.pump();
+    final field = tester.widget<TextField>(find.byType(TextField).first);
+    expect(field.controller!.text, '/work/gone-e2e');
+  });
 }
