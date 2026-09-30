@@ -26,6 +26,7 @@ double contrastRatio(Color a, Color b) {
     final l = c.computeLuminance();
     return l;
   }
+
   final lighter = lum(a) > lum(b) ? lum(a) : lum(b);
   final darker = lum(a) > lum(b) ? lum(b) : lum(a);
   return (lighter + 0.05) / (darker + 0.05);
@@ -68,14 +69,18 @@ class AppearancePage extends ConsumerWidget {
           ),
           SettingsSection(
             title: 'Follow system',
-            hint: 'Use paper when the device is light, the dark theme otherwise.',
+            hint:
+                'Use paper when the device is light, the dark theme otherwise.',
             child: SwitchListTile(
               key: const ValueKey('appearance-follow-system'),
               value: appearance.followSystem,
               onChanged: (v) => store.setFollowSystem(v),
               title: Text(
                 'Follow system light or dark',
-                style: TextStyle(color: tokens.ink, fontSize: OmpMetrics.fsBase),
+                style: TextStyle(
+                  color: tokens.ink,
+                  fontSize: OmpMetrics.fsBase,
+                ),
               ),
               contentPadding: EdgeInsets.zero,
             ),
@@ -96,8 +101,12 @@ class AppearancePage extends ConsumerWidget {
           SettingsSection(
             title: 'Density',
             child: _Segmented<AppearanceDensity>(
+              key: const ValueKey('appearance-density'),
               value: appearance.density,
-              labels: const {AppearanceDensity.comfortable: 'Comfortable', AppearanceDensity.compact: 'Compact'},
+              labels: const {
+                AppearanceDensity.comfortable: 'Comfortable',
+                AppearanceDensity.compact: 'Compact',
+              },
               onChanged: store.setDensity,
             ),
           ),
@@ -177,11 +186,26 @@ class _PresetCard extends StatelessWidget {
                   padding: const EdgeInsets.all(4),
                   child: Row(
                     children: [
-                      Expanded(child: ColoredBox(color: preview.canvas, child: const SizedBox.expand())),
+                      Expanded(
+                        child: ColoredBox(
+                          color: preview.canvas,
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
                       const SizedBox(width: 2),
-                      Expanded(child: ColoredBox(color: preview.accent, child: const SizedBox.expand())),
+                      Expanded(
+                        child: ColoredBox(
+                          color: preview.accent,
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
                       const SizedBox(width: 2),
-                      Expanded(child: ColoredBox(color: preview.ink, child: const SizedBox.expand())),
+                      Expanded(
+                        child: ColoredBox(
+                          color: preview.ink,
+                          child: const SizedBox.expand(),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -190,17 +214,30 @@ class _PresetCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: TextStyle(color: tokens.ink, fontSize: OmpMetrics.fsBase)),
+                      Text(
+                        name,
+                        style: TextStyle(
+                          color: tokens.ink,
+                          fontSize: OmpMetrics.fsBase,
+                        ),
+                      ),
                       Text(
                         description,
-                        style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsSm),
+                        style: TextStyle(
+                          color: tokens.ink3,
+                          fontSize: OmpMetrics.fsSm,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 if (selected)
-                  Icon(Icons.check, color: preview.accent, size: 20,
-                      semanticLabel: '$name selected'),
+                  Icon(
+                    Icons.check,
+                    color: preview.accent,
+                    size: 20,
+                    semanticLabel: '$name selected',
+                  ),
               ],
             ),
           ),
@@ -225,14 +262,20 @@ class _AccentSwatches extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
 
-    Widget swatch({String? key, required VoidCallback onTap,
-        required Color color, required String label, required bool selected}) {
+    Widget swatch({
+      String? key,
+      required VoidCallback onTap,
+      required Color color,
+      required String label,
+      required bool selected,
+    }) {
       final lowContrast = contrastRatio(color, presetBg) < 3.0;
       return Semantics(
         checked: selected,
         inMutuallyExclusiveGroup: true,
         button: true,
-        label: '$label accent${lowContrast ? ', low contrast on this theme' : ''}',
+        label:
+            '$label accent${lowContrast ? ', low contrast on this theme' : ''}',
         child: InkWell(
           key: ValueKey('appearance-accent-${key ?? 'default'}'),
           onTap: onTap,
@@ -253,9 +296,13 @@ class _AccentSwatches extends StatelessWidget {
                   ),
                 ),
                 child: selected
-                    ? Icon(Icons.check,
+                    ? Icon(
+                        Icons.check,
                         size: 18,
-                        color: color.computeLuminance() > 0.4 ? Colors.black : Colors.white)
+                        color: color.computeLuminance() > 0.4
+                            ? Colors.black
+                            : Colors.white,
+                      )
                     : null,
               ),
             ),
@@ -283,7 +330,9 @@ class _AccentSwatches extends StatelessWidget {
             for (final a in AccentChoice.all)
               Builder(
                 builder: (context) {
-                  final c = Color(int.parse('FF${a.hex.substring(1)}', radix: 16));
+                  final c = Color(
+                    int.parse('FF${a.hex.substring(1)}', radix: 16),
+                  );
                   return swatch(
                     key: a.id,
                     color: c,
@@ -298,9 +347,10 @@ class _AccentSwatches extends StatelessWidget {
         for (final a in AccentChoice.all)
           if (selectedHex == a.hex &&
               contrastRatio(
-                Color(int.parse('FF${a.hex.substring(1)}', radix: 16)),
-                presetBg,
-              ) < 3.0)
+                    Color(int.parse('FF${a.hex.substring(1)}', radix: 16)),
+                    presetBg,
+                  ) <
+                  3.0)
             Padding(
               key: const ValueKey('appearance-accent-low-contrast'),
               padding: const EdgeInsets.only(top: OmpMetrics.s2),
@@ -314,8 +364,13 @@ class _AccentSwatches extends StatelessWidget {
   }
 }
 
+/// A full-width segmented picker. Flutter's SegmentedButton sizes itself to
+/// its labels and ignores the available width, so "Small/Default/Large/
+/// Larger" ran off a 384dp phone. Here every segment gets an equal share of
+/// the width and a label that shrinks to fit rather than overflowing.
 class _Segmented<T> extends StatelessWidget {
   const _Segmented({
+    super.key,
     required this.value,
     required this.labels,
     required this.onChanged,
@@ -328,20 +383,92 @@ class _Segmented<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
-    // Horizontal scroll (triage #11): at narrow widths with large text the
-    // segments must overflow into a scroll, never a RenderFlex overflow.
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SegmentedButton<T>(
-        segments: [
-          for (final entry in labels.entries)
-            ButtonSegment(value: entry.key, label: Text(entry.value)),
-        ],
-        selected: {value},
-        onSelectionChanged: (s) => onChanged(s.first),
-        style: ButtonStyle(
-          foregroundColor: WidgetStateProperty.resolveWith(
-            (states) => states.contains(WidgetState.selected) ? tokens.ink : tokens.ink3,
+    final radius = BorderRadius.circular(OmpMetrics.radiusMd);
+    final entries = labels.entries.toList();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: radius,
+        border: Border.all(color: tokens.lineStrong),
+      ),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < entries.length; i++) ...[
+                if (i > 0)
+                  VerticalDivider(
+                    width: 1,
+                    thickness: 1,
+                    color: tokens.lineStrong,
+                  ),
+                Expanded(
+                  child: _Segment(
+                    label: entries[i].value,
+                    selected: entries[i].key == value,
+                    onTap: () => onChanged(entries[i].key),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Segment extends StatelessWidget {
+  const _Segment({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<OmpTokens>()!;
+    return Semantics(
+      button: true,
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      label: label,
+      excludeSemantics: true,
+      // The InkWell's own action is excluded with its node; expose tap here.
+      onTap: onTap,
+      child: Material(
+        color: selected
+            ? tokens.accent.withValues(alpha: 0.18)
+            : Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: OmpMetrics.s2,
+                vertical: OmpMetrics.s2,
+              ),
+              child: Center(
+                // Shrink the label rather than overflow at huge text sizes.
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: selected ? tokens.ink : tokens.ink3,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -365,6 +492,7 @@ class _TextScaleSegmented extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Segmented<double>(
+      key: const ValueKey('appearance-text-size'),
       value: appearanceTextScales.contains(value) ? value : 1.0,
       labels: _labels,
       onChanged: onChanged,
