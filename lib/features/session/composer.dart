@@ -21,6 +21,9 @@ import '../../theme/tokens.dart';
 import '../../transcript/send.dart' show sendPlan, PromptMode;
 import 'slash_menu.dart';
 
+/// The composer grows with its text up to this many lines, then scrolls.
+const composerMaxLines = 5;
+
 class SessionComposer extends ConsumerStatefulWidget {
   const SessionComposer({super.key, required this.gwId});
 
@@ -86,8 +89,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     _draftLoaded = true;
     if (draft.isNotEmpty && _text.text.isEmpty) {
       _text.text = draft;
-      _text.selection =
-          TextSelection.collapsed(offset: _text.text.length);
+      _text.selection = TextSelection.collapsed(offset: _text.text.length);
     }
   }
 
@@ -160,148 +162,192 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
     final state = ref.watch(sessionControllerProvider(widget.gwId));
     final streaming = state.running;
-    final ended = state.phase == SessionPhase.gone || state.info?.exited == true;
+    final ended =
+        state.phase == SessionPhase.gone || state.info?.exited == true;
     final enabled = state.phase == SessionPhase.ready && !ended;
     final canSend = enabled && !_sending && _text.text.trim().isNotEmpty;
     final plan = sendPlan(streaming);
 
     final query = _dismissedFor == _text.text ? null : slashQuery(_text.text);
-    final groups =
-        query != null ? filterCommands(state.slashCommands, query) : const <SlashGroup>[];
+    final groups = query != null
+        ? filterCommands(state.slashCommands, query)
+        : const <SlashGroup>[];
     final flat = flattenGroups(groups);
     final menuOpen = flat.isNotEmpty;
     final selected = flat.isEmpty
         ? 0
         : _sel < 0
-            ? 0
-            : (_sel >= flat.length ? flat.length - 1 : _sel);
+        ? 0
+        : (_sel >= flat.length ? flat.length - 1 : _sel);
 
     return SafeArea(
       top: false,
       child: Padding(
         padding: EdgeInsets.only(
-            left: OmpMetrics.s3,
-            right: OmpMetrics.s3,
-            top: OmpMetrics.s2,
-            bottom: OmpMetrics.s3),
+          left: OmpMetrics.s3,
+          right: OmpMetrics.s3,
+          top: OmpMetrics.s2,
+          bottom: OmpMetrics.s3,
+        ),
         child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (menuOpen)
-            Padding(
-              padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
-              child: SlashMenu(
-                groups: groups,
-                active: selected,
-                onPick: _pick,
-                onHover: (i) => setState(() => _sel = i),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (menuOpen)
+              Padding(
+                padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
+                child: SlashMenu(
+                  groups: groups,
+                  active: selected,
+                  onPick: _pick,
+                  onHover: (i) => setState(() => _sel = i),
+                ),
               ),
-            ),
-          Container(
-            decoration: BoxDecoration(
-              color: tokens.field,
-              borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
-              border: Border.all(
-                  color: _focus.hasFocus ? tokens.accent : tokens.lineStrong),
-            ),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: OmpMetrics.s4, vertical: OmpMetrics.s1),
-                  child: TextField(
-                    controller: _text,
-                    focusNode: _focus,
-                    enabled: enabled && !_sending,
-                    minLines: 1,
-                    maxLines: 6,
-                    textInputAction: TextInputAction.newline,
-                    onChanged: _onChanged,
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      hintText: !enabled
-                          ? 'This session has ended'
-                          : streaming
-                              ? 'Steer, or queue a message for after this turn'
-                              : 'Message omp',
-                      hintStyle:
-                          TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsBase),
-                    ),
-                    style: TextStyle(
-                        color: tokens.ink,
-                        fontSize: 16 // below the 48px iOS zoom threshold
+            // While a turn runs, Stop and Queue sit in a slim strip above the
+            // field, so the right of the field only ever holds one compact
+            // button (Send, or Steer while running).
+            if (streaming)
+              Padding(
+                padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
+                child: Row(
+                  children: [
+                    if (state.queued > 0)
+                      Text(
+                        '${state.queued} queued',
+                        style: TextStyle(
+                          color: tokens.ink3,
+                          fontSize: OmpMetrics.fsSm,
                         ),
+                      ),
+                    const Spacer(),
+                    if (plan.secondary != null)
+                      _stripAction(
+                        tokens,
+                        plan.secondary!.label,
+                        Icons.low_priority,
+                        onTap: canSend
+                            ? () => _submit(plan.secondary!.mode)
+                            : null,
+                      ),
+                    _stripAction(
+                      tokens,
+                      'Stop',
+                      Icons.stop,
+                      color: tokens.err,
+                      onTap: enabled ? _stop : null,
+                    ),
+                  ],
+                ),
+              ),
+            Row(
+              // The button stays by the last line as the field grows.
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: tokens.field,
+                      borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
+                      border: Border.all(
+                        color: _focus.hasFocus
+                            ? tokens.accent
+                            : tokens.lineStrong,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: OmpMetrics.s3,
+                      vertical: OmpMetrics.s1,
+                    ),
+                    child: TextField(
+                      controller: _text,
+                      focusNode: _focus,
+                      enabled: enabled && !_sending,
+                      // Grows to five lines, then scrolls inside the field.
+                      minLines: 1,
+                      maxLines: composerMaxLines,
+                      textInputAction: TextInputAction.newline,
+                      onChanged: _onChanged,
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: OmpMetrics.s2 + 2,
+                        ),
+                        hintText: !enabled
+                            ? 'This session has ended'
+                            : streaming
+                            ? 'Steer, or queue for after this turn'
+                            : 'Message omp',
+                        hintMaxLines: 1,
+                        hintStyle: TextStyle(
+                          color: tokens.ink3,
+                          fontSize: OmpMetrics.fsBase,
+                        ),
+                      ),
+                      style: TextStyle(
+                        color: tokens.ink,
+                        fontSize: 16, // below the 48px iOS zoom threshold
+                      ),
+                    ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                      OmpMetrics.s2, 0, OmpMetrics.s2, OmpMetrics.s2),
-                  child: Row(
-                    children: [
-                      // TODO(E): attach images (camera, gallery, paste).
-                      const Spacer(),
-                      if (state.queued > 0) ...[
-                        Text('${state.queued} queued',
-                            style: TextStyle(
-                                color: tokens.ink3, fontSize: OmpMetrics.fsSm)),
-                        const SizedBox(width: OmpMetrics.s2),
-                      ],
-                      if (streaming) ...[
-                        _action(context, tokens, 'Stop', Icons.stop,
-                            color: tokens.err, onTap: enabled ? _stop : null),
-                        const SizedBox(width: OmpMetrics.s1),
-                        if (plan.secondary != null)
-                          _action(context, tokens, plan.secondary!.label,
-                              Icons.low_priority,
-                              onTap: canSend
-                                  ? () => _submit(plan.secondary!.mode)
-                                  : null),
-                        const SizedBox(width: OmpMetrics.s1),
-                        _action(context, tokens, plan.primary.label, Icons.send,
-                            filled: true, onTap: canSend ? () => _submit() : null),
-                      ] else
-                        IconButton.filled(
-                          onPressed: canSend ? () => _submit() : null,
-                          icon: const Icon(Icons.arrow_upward),
-                          tooltip: 'Send',
-                          constraints: const BoxConstraints(
-                              minWidth: OmpMetrics.hit, minHeight: OmpMetrics.hit),
-                        ),
-                    ],
-                  ),
+                const SizedBox(width: OmpMetrics.s1),
+                _sendButton(
+                  tokens,
+                  label: plan.primary.label,
+                  icon: streaming ? Icons.send : Icons.arrow_upward,
+                  onTap: canSend ? () => _submit() : null,
                 ),
               ],
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );
   }
 
-  Widget _action(BuildContext context, OmpTokens tokens, String label,
-      IconData icon,
-      {Color? color, bool filled = false, VoidCallback? onTap}) {
-    final bg = filled ? tokens.accent : tokens.press;
-    final fg = filled ? tokens.accentInk : (color ?? tokens.ink);
-    return Semantics(
-      button: true,
-      label: label,
-      child: Material(
-        color: bg,
-        borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
-          child: Container(
-            constraints:
-                const BoxConstraints(minHeight: OmpMetrics.hit, minWidth: OmpMetrics.hit),
-            padding:
-                const EdgeInsets.symmetric(horizontal: OmpMetrics.s2),
-            child: Icon(icon, size: 20, color: onTap == null ? tokens.ink3 : fg),
-          ),
-        ),
+  /// The round send button beside the field: a 40dp circle inside a 48dp
+  /// touch target (the padded tap target), so it looks compact without
+  /// becoming hard to hit.
+  Widget _sendButton(
+    OmpTokens tokens, {
+    required String label,
+    required IconData icon,
+    VoidCallback? onTap,
+  }) {
+    return IconButton.filled(
+      onPressed: onTap,
+      tooltip: label,
+      icon: Icon(icon, size: 20),
+      style: IconButton.styleFrom(
+        fixedSize: const Size(40, 40),
+        minimumSize: const Size(40, 40),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.padded,
+        backgroundColor: tokens.accent,
+        foregroundColor: tokens.accentInk,
+        disabledBackgroundColor: tokens.press,
+        disabledForegroundColor: tokens.ink3,
+      ),
+    );
+  }
+
+  Widget _stripAction(
+    OmpTokens tokens,
+    String label,
+    IconData icon, {
+    Color? color,
+    VoidCallback? onTap,
+  }) {
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(label, style: const TextStyle(fontSize: OmpMetrics.fsSm)),
+      style: TextButton.styleFrom(
+        foregroundColor: color ?? tokens.ink2,
+        disabledForegroundColor: tokens.ink3,
+        minimumSize: const Size(OmpMetrics.hit, OmpMetrics.hit),
+        padding: const EdgeInsets.symmetric(horizontal: OmpMetrics.s2),
       ),
     );
   }
