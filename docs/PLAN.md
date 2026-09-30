@@ -171,6 +171,45 @@ gallery, paste) through the prompt `images` field; search across sessions
 (titles) in a palette sheet; settings: appearance (preset, accent, density,
 text size), connection, models, skills, usage (read-only views).
 
+E1 (plan panel, diffs/Changes, message actions, stats for nerds) shipped.
+E2 is split in two parallel tasks with disjoint files. Neither touches
+`lib/features/sessions/sessions_screen.dart` or `lib/app/app.dart`'s
+MaterialApp wiring beyond what is listed; the orchestrator wires the entry
+points (app-bar search icon, overflow "Settings") after both land.
+
+**E2a. Settings + diagnostics.** Owns `lib/features/settings/**`,
+`lib/state/appearance_store.dart`, `lib/app/app.dart` (replace the
+placeholder `DarkPresetNotifier`/`AccentOverrideNotifier` with the persisted
+store; MaterialApp `theme`/`darkTheme`/`themeMode`/`builder`), `lib/theme/**`
+(density + text size plumbing only), tests under `test/features/settings/**`
+and `test/state/appearance_store_test.dart`. Pages, ported from
+`web/src/components/settings/*`: Appearance (preset cards, follow system,
+accent swatches from `web/src/lib/state/accents.ts` + theme default, density,
+text size), Connection (`/api/system` rows, signed-in method from `/api/me`,
+sign out with confirm), Diagnostics (health, auth, WebSocket leg, omp
+version, catalog reachable; each row pass/fail/unknown with a fix hint;
+re-runnable), Models (catalog list with search, read-only), Skills, Usage
+(ANSI report via `lib/render/ansi.dart`, refresh). Public entry:
+`SettingsScreen({SettingsPage? initial})` + `enum SettingsPage`.
+
+**E2b. Search palette + image attach.** Owns `lib/palette/**`,
+`lib/features/palette/**`, `lib/composer/images.dart`,
+`lib/features/session/composer.dart`, `lib/features/session/image_tray.dart`,
+`lib/state/session_controller.dart` (send/retry with images only),
+`pubspec.yaml` + `README.md` (dependency `image_picker`), Android manifest
+entries image_picker needs, tests under `test/palette/**`,
+`test/features/palette/**`, `test/composer/images_test.dart`,
+`test/features/session/composer_test.dart`. Palette: port
+`web/src/lib/palette/{fuzzy,palette}.ts` minus desktop-only items (shortcuts,
+theme toggle, slash); items = actions (New session, Next session that needs
+you, Settings pages), live sessions, history; ranking tests ported. Public
+entry: `showPaletteSheet(context, {required PaletteActions actions})` with
+actions injected. Images: gallery (multi) + camera via `image_picker`,
+Gboard/keyboard image insertion via `contentInsertionConfiguration`; rules
+from `web/src/lib/composer/images.ts` (max 4, png/jpeg/webp/gif, 5 MB);
+downscale camera/gallery picks so a phone photo fits; thumbnail tray with
+remove; images-only send allowed; a failed send keeps its images for Retry.
+
 ### F. Android native (after D2, parallel with E where files don't overlap)
 
 Foreground service (type `dataSync` or `remoteMessaging`, whichever Play
