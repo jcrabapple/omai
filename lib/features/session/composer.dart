@@ -268,7 +268,17 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                       textInputAction: TextInputAction.newline,
                       onChanged: _onChanged,
                       decoration: InputDecoration(
+                        // The rounded container around the field draws the one outline
+                        // (and the focus colour). The app theme gives every field its own
+                        // enabled/focused outline and fill, and `border: none` alone doesn't
+                        // override those, which drew a second box inside the first.
                         border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        disabledBorder: InputBorder.none,
+                        errorBorder: InputBorder.none,
+                        focusedErrorBorder: InputBorder.none,
+                        filled: false,
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(
                           vertical: OmpMetrics.s2 + 2,

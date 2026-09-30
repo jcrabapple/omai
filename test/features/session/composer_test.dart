@@ -650,7 +650,6 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-
   testWidgets('the send button sits to the right of the field, compact but '
       'with a 48dp touch target', (tester) async {
     tester.view.physicalSize = const Size(400, 800);
@@ -779,5 +778,43 @@ void main() {
       );
     }
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the field has exactly one outline, focused or not', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final container = _container(gateway: FakeGateway(), hub: SocketHub());
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    // The decoration the field actually paints, after the theme's defaults.
+    InputDecoration effective() => tester
+        .widget<InputDecorator>(
+          find.descendant(
+            of: _composerField(),
+            matching: find.byType(InputDecorator),
+          ),
+        )
+        .decoration;
+
+    void expectNoInnerOutline(String when) {
+      final d = effective();
+      for (final b in [d.enabledBorder, d.focusedBorder, d.border]) {
+        expect(
+          b == null || b == InputBorder.none,
+          isTrue,
+          reason: '$when: the field must not draw its own outline ($b)',
+        );
+      }
+      expect(d.filled, isNot(true), reason: '$when: no inner fill box either');
+    }
+
+    expectNoInnerOutline('unfocused');
+    await tester.tap(_composerField());
+    await tester.pump();
+    expectNoInnerOutline('focused');
   });
 }
