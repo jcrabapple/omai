@@ -13,6 +13,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="$HOME/development/flutter/bin:$HOME/Android/Sdk/platform-tools:$PATH"
 export JAVA_HOME="${JAVA_HOME:-$HOME/.local/share/jbr}"
+# apksigner is a shell wrapper that execs `java` from PATH, not JAVA_HOME.
+export PATH="$JAVA_HOME/bin:$PATH"
 
 bump="" install=0
 while [ $# -gt 0 ]; do
