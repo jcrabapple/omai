@@ -15,6 +15,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../api/errors.dart';
+import '../../composer/at_query.dart';
 import '../../composer/drafts.dart';
 import '../../composer/images.dart';
 import '../../composer/slash.dart';
@@ -23,11 +25,16 @@ import '../../state/session_controller.dart';
 import '../../theme/tokens.dart';
 import '../../transcript/reducer.dart' show lastTurnFailure;
 import '../../transcript/send.dart' show sendPlan, PromptMode;
+import 'at_menu.dart';
 import 'image_tray.dart';
 import 'slash_menu.dart';
 
 /// The composer grows with its text up to this many lines, then scrolls.
 const composerMaxLines = 5;
+
+/// @-file mentions: rows shown and debounce, from the web Composer.
+const _atLimit = 8;
+const _atDebounceMs = 150;
 
 /// Where the attach sheet can pull images from.
 enum ImagePickSource { gallery, camera }
@@ -96,6 +103,27 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   int _sel = 0;
   Timer? _saveTimer;
 
+  // @-file mention state (web Composer's at-* fields).
+  String? _atDismissedFor;
+  int _atSel = 0;
+  String? _atNote;
+  List<FileIndexEntry> _atEntries = const [];
+  Timer? _atDebounce;
+
+  /// Guard so a response for an older query never overwrites a newer one.
+  int _atGen = 0;
+
+  /// The current prefix's listing has arrived (rows or empty): empty plus
+  /// loaded renders 'No matches' instead of nothing.
+  bool _atLoaded = false;
+
+  /// Directory currently being listed ('' = the cwd); null = nothing.
+  String? _atActivePrefix;
+
+  /// Listings live one @-interaction: omp creates files as it works, so a
+  /// new directory or a send drops the cache.
+  final Map<String, List<FileIndexEntry>> _atCache = {};
+
   // The failed send the composer is holding restored content for: when its
   // Retry acks and the content is unchanged, it is cleared (triage #12).
   _FailedSendSnapshot? _failedSend;
@@ -110,6 +138,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     // Escape dismisses the slash menu (hardware keyboard), like the web's
     // keydown handler setting `dismissedFor`.
     _focus.onKeyEvent = _handleKey;
+    _text.addListener(_onTextChanged);
     _kv = ref.read(draftKvProvider);
     _connId = ref.read(connectionNotifierProvider).active?.id ?? '';
     _loadDraft();
@@ -117,10 +146,17 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape &&
-        slashQuery(_text.text) != null) {
-      setState(() => _dismissedFor = _text.text);
-      return KeyEventResult.handled;
+        event.logicalKey == LogicalKeyboardKey.escape) {
+      // Escape dismisses the @ menu first; only when it is closed does the
+      // slash menu get it (the web handles atOpen before menuOpen).
+      if (_atOpen) {
+        setState(() => _atDismissedFor = _text.text);
+        return KeyEventResult.handled;
+      }
+      if (slashQuery(_text.text) != null) {
+        setState(() => _dismissedFor = _text.text);
+        return KeyEventResult.handled;
+      }
     }
     return KeyEventResult.ignored;
   }
@@ -128,6 +164,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _atDebounce?.cancel();
     // Flush the draft on the way out, unless a send is in flight (the send
     // path owns the draft then).
     if (!_sending) {
@@ -148,11 +185,142 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     }
   }
 
+  /// Controller listener: the @-token depends on the caret too, so a caret
+  /// move without a text change (a tap) must rebuild.
+  void _onTextChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _onChanged(String value) {
     _sel = 0;
+    // Any edit rebuilds the @-token, so a dismissal never survives an input.
+    _atDismissedFor = null;
+    _atSel = 0;
     // Debounced save, like the web's 250ms timer.
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(milliseconds: 250), _saveDraftNow);
+    setState(() {});
+  }
+
+  // ------------------------------------------------- @-file mentions
+
+  /// The text up to the caret, where the @-token lives.
+  String get _beforeCaret {
+    final offset = _text.selection.baseOffset;
+    if (offset < 0) return _text.text;
+    return _text.text.substring(0, offset.clamp(0, _text.text.length));
+  }
+
+  AtQuery? get _currentAt => extractAtQuery(_beforeCaret);
+
+  bool get _atOpen {
+    if (_sessionEnded) return false;
+    final at = _currentAt;
+    return at != null && _atDismissedFor != _text.text;
+  }
+
+  bool get _sessionEnded {
+    final state = ref.read(sessionControllerProvider(widget.gwId));
+    return state.phase == SessionPhase.gone || state.info?.exited == true;
+  }
+
+  /// Keep the listing in sync with the @-token's directory: debounce 150ms,
+  /// serve repeats from the cache, drop the cache when the directory moves.
+  /// Called from build with the currently wanted prefix (null = no menu).
+  void _syncAt(String? prefix) {
+    if (prefix != _atActivePrefix) {
+      _atActivePrefix = prefix;
+      _atDebounce?.cancel();
+      final gen = ++_atGen;
+      _atNote = null;
+      if (prefix == null) {
+        _atEntries = const [];
+        return;
+      }
+      final cached = _atCache[prefix];
+      if (cached != null) {
+        _atEntries = cached;
+        _atLoaded = true;
+        return;
+      }
+      _atEntries = const [];
+      _atLoaded = false;
+      _atDebounce = Timer(const Duration(milliseconds: _atDebounceMs), () {
+        unawaited(_fetchAtEntries(prefix, gen));
+      });
+    }
+  }
+
+  Future<void> _fetchAtEntries(String prefix, int gen) async {
+    try {
+      final env = await ref.read(sessionEnvProvider.future);
+      if (!mounted || gen != _atGen) return;
+      final raw = await env.client.files(widget.gwId, prefix: prefix);
+      if (!mounted || gen != _atGen) return;
+      final json = raw['entries'];
+      final entries = <FileIndexEntry>[];
+      if (json is List) {
+        for (final e in json) {
+          if (e is Map<String, Object?>) {
+            entries.add(FileIndexEntry.fromJson(e));
+          }
+        }
+      }
+      _atCache
+        ..clear()
+        ..[prefix] = entries;
+      setState(() {
+        _atEntries = entries;
+        _atNote = null;
+        _atLoaded = true;
+      });
+    } on GatewayError catch (e) {
+      if (!mounted || gen != _atGen) return;
+      setState(() {
+        _atEntries = const [];
+        // Confinement rejections are their own quiet note.
+        _atNote = e.status == 403 || e.status == 422
+            ? 'Outside the session folder'
+            : 'File list unavailable';
+      });
+    } catch (_) {
+      // Dead session, offline, 5xx: a quiet note, never a crash or toast.
+      if (!mounted || gen != _atGen) return;
+      setState(() {
+        _atEntries = const [];
+        _atNote = 'File list unavailable';
+      });
+    }
+  }
+
+  /// A folder row drills into the folder: the token becomes `@dir/` and the
+  /// menu stays open for that directory.
+  void _drillAtDir(FileIndexEntry entry) {
+    final at = _currentAt;
+    if (at == null) return;
+    _applyMention(
+      insertMention(_text.text, at, '${entry.path}/'),
+      keepOpen: true,
+    );
+  }
+
+  /// A file row replaces the @-token with the path and closes the menu.
+  void _pickAtFile(FileIndexEntry entry) {
+    final at = _currentAt;
+    if (at == null) return;
+    _applyMention(insertMention(_text.text, at, entry.path), keepOpen: false);
+  }
+
+  void _applyMention(({String text, int caret}) res, {required bool keepOpen}) {
+    _text.text = res.text;
+    _text.selection = TextSelection.collapsed(offset: res.caret);
+    if (!keepOpen) {
+      // Dismiss THIS draft so the menu closes instead of re-opening over the
+      // inserted path.
+      _atDismissedFor = res.text;
+    }
+    _atSel = 0;
+    _focus.requestFocus();
     setState(() {});
   }
 
@@ -242,6 +410,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final mode = modeOverride ?? plan.primary.mode;
     HapticFeedback.lightImpact();
     setState(() => _sending = true);
+    // omp may create files during the turn: drop the @-listing cache.
+    _atCache.clear();
+    _atDismissedFor = null;
     final images = [for (final a in _images) toPromptImage(a.bytes)];
     final ok = await ref
         .read(sessionControllerProvider(widget.gwId).notifier)
@@ -358,11 +529,27 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final plan = sendPlan(streaming);
 
     final query = _dismissedFor == _text.text ? null : slashQuery(_text.text);
-    final groups = query != null
+    // Only one menu may be open: the @ menu wins (the web's keydown order).
+    final atOpen = _atOpen;
+    final at = atOpen ? _currentAt : null;
+    final atPrefix = at != null ? atDirPrefix(at.query) : null;
+    _syncAt(atPrefix);
+    final atList = at != null
+        ? rankEntries(_atEntries, at.query).take(_atLimit).toList()
+        : <FileIndexEntry>[];
+    final atNote =
+        _atNote ?? (atList.isEmpty && _atLoaded ? 'No matches' : null);
+    final atShow = atOpen && (atList.isNotEmpty || atNote != null);
+    final atActive = atList.isEmpty
+        ? 0
+        : (_atSel < 0
+              ? 0
+              : (_atSel >= atList.length ? atList.length - 1 : _atSel));
+    final groups = !atOpen && query != null
         ? filterCommands(state.slashCommands, query)
         : const <SlashGroup>[];
     final flat = flattenGroups(groups);
-    final menuOpen = flat.isNotEmpty;
+    final menuOpen = !atOpen && flat.isNotEmpty;
     final selected = flat.isEmpty
         ? 0
         : _sel < 0
@@ -382,6 +569,17 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (atShow)
+              Padding(
+                padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
+                child: AtMenu(
+                  entries: atList,
+                  active: atActive,
+                  note: atNote,
+                  onPick: (e) => e.isDir ? _drillAtDir(e) : _pickAtFile(e),
+                  onHover: (i) => setState(() => _atSel = i),
+                ),
+              ),
             if (menuOpen)
               Padding(
                 padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
