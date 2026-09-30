@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The whole app is a network client. Debug builds also get this from
+         src/debug; release builds only have what is declared here. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Task F: foreground-service keep-alive while a followed turn runs. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
