@@ -24,7 +24,7 @@ class GatewayClient {
   })  : baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), ''),
         _client = client ?? http.Client();
 
-  /// Base URL without trailing slashes; e.g. `https://ohmypi.example.com`.
+  /// Base URL without trailing slashes; e.g. `https://gateway.example.com`.
   final String baseUrl;
   final String token;
   final Duration timeout;

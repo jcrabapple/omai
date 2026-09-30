@@ -5,10 +5,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/api/models.dart';
-import 'package:ohmypi/state/models_store.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/widgets/model_picker.dart';
+import 'package:omai/api/models.dart';
+import 'package:omai/state/models_store.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/widgets/model_picker.dart';
 
 CatalogModel _m(String provider, String id, String name,
         {int contextWindow = 200000, double input = 3, double output = 15}) =>

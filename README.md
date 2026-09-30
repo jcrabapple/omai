@@ -1,4 +1,8 @@
-# ohmypi-android
+# Omai
+
+Omai is an Android client for the ohmypi gateway. (Repo directory:
+`ohmypi-android`; app id `us.snakepit.omai`.)
+
 
 Flutter Android client for the [ohmypi gateway](../ohmypi-gateway). Plan and
 task breakdown: `docs/PLAN.md`. Coder rules: `AGENTS.md`.
@@ -23,7 +27,7 @@ Versions pinned exactly in `pubspec.yaml`.
 The foreground service, notifications, share intent, shortcuts and adaptive
 icon are all plain Kotlin + manifest declarations (`KeepaliveService.kt`,
 `KeepaliveActionReceiver.kt`, `MainActivity.kt`), behind one MethodChannel
-(`us.snakepit.ohmypi/native`) and the Dart-side `KeepaliveSurface` interface
+(`us.snakepit.omai/native`) and the Dart-side `KeepaliveSurface` interface
 (`lib/native/`). Evaluated alternatives, both rejected to keep the dependency
 graph unchanged:
 

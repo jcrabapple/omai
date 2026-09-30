@@ -1,7 +1,7 @@
 // Ported from web/src/lib/state/__tests__/plan.test.ts (the pure helpers;
 // the reactive store part is covered by the controller + widget tests).
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/transcript/plan.dart';
+import 'package:omai/transcript/plan.dart';
 
 // Live capture from the gateway, 2026-09-29: ids absent, `blocked` carries a
 // blocker string.

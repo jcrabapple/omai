@@ -3,17 +3,17 @@
 // theme presets.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/transcript/diff.dart';
-import 'package:ohmypi/transcript/items.dart';
-import 'package:ohmypi/widgets/items/command_card.dart';
-import 'package:ohmypi/widgets/items/diff_block.dart';
-import 'package:ohmypi/widgets/items/notice_line.dart';
-import 'package:ohmypi/widgets/items/skill_chip.dart';
-import 'package:ohmypi/widgets/items/thinking_row.dart';
-import 'package:ohmypi/widgets/items/tool_group.dart';
-import 'package:ohmypi/widgets/items/tool_output.dart';
-import 'package:ohmypi/widgets/transcript_item.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/transcript/diff.dart';
+import 'package:omai/transcript/items.dart';
+import 'package:omai/widgets/items/command_card.dart';
+import 'package:omai/widgets/items/diff_block.dart';
+import 'package:omai/widgets/items/notice_line.dart';
+import 'package:omai/widgets/items/skill_chip.dart';
+import 'package:omai/widgets/items/thinking_row.dart';
+import 'package:omai/widgets/items/tool_group.dart';
+import 'package:omai/widgets/items/tool_output.dart';
+import 'package:omai/widgets/transcript_item.dart';
 
 import '../pump_omp.dart';
 

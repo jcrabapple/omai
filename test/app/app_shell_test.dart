@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:ohmypi/app/app.dart';
-import 'package:ohmypi/features/sessions/sessions_screen.dart';
-import 'package:ohmypi/state/connection_notifier.dart';
-import 'package:ohmypi/state/connection_store.dart';
-import 'package:ohmypi/state/reviewed_store.dart';
-import 'package:ohmypi/state/sessions_store.dart';
+import 'package:omai/app/app.dart';
+import 'package:omai/features/sessions/sessions_screen.dart';
+import 'package:omai/state/connection_notifier.dart';
+import 'package:omai/state/connection_store.dart';
+import 'package:omai/state/reviewed_store.dart';
+import 'package:omai/state/sessions_store.dart';
 
 class MockConnectionPrefs extends Mock implements ConnectionPrefs {}
 
@@ -53,7 +53,7 @@ void main() {
   testWidgets('signed out shows the Connect screen', (tester) async {
     await tester.pumpWidget(wrap());
     await tester.pump();
-    expect(find.text('Connect to ohmypi'), findsOneWidget);
+    expect(find.text('Connect to a gateway'), findsOneWidget);
     expect(find.text('Gateway URL'), findsOneWidget);
     expect(find.text('Gateway token'), findsOneWidget);
     expect(find.byType(SessionsScreen), findsNothing);

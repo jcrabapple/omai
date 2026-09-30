@@ -3,7 +3,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/wire/wire.dart';
+import 'package:omai/wire/wire.dart';
 
 Map<String, Object?> m(Object? Function() f) => f() as Map<String, Object?>;
 

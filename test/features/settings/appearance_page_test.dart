@@ -6,13 +6,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/features/settings/appearance_page.dart';
-import 'package:ohmypi/state/appearance_store.dart';
-import 'package:ohmypi/state/reviewed_store.dart';
+import 'package:omai/features/settings/appearance_page.dart';
+import 'package:omai/state/appearance_store.dart';
+import 'package:omai/state/reviewed_store.dart';
 
 import 'dart:ui' show SemanticsFlag;
 
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/theme/presets.dart';
 
 import 'fakes.dart';
 

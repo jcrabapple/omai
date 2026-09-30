@@ -33,7 +33,7 @@ class OmpApp extends ConsumerStatefulWidget {
 }
 
 class _OmpAppState extends ConsumerState<OmpApp> {
-  static const _channel = MethodChannel('us.snakepit.ohmypi/native');
+  static const _channel = MethodChannel('us.snakepit.omai/native');
 
   // Set when a navigation intent (share, shortcut, notification tap) lands
   // before the connection notifier has settled: it is dispatched once the
@@ -220,7 +220,7 @@ class _OmpAppState extends ConsumerState<OmpApp> {
     final density = appearance.density.visualDensity;
 
     return MaterialApp(
-      title: 'ohmypi',
+      title: 'Omai',
       navigatorKey: _rootNavigatorKey,
       // Follow system on: paper when the device is light, the chosen dark
       // preset otherwise (a paper choice uses terminal on the dark side).

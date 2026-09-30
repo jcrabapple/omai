@@ -1,4 +1,7 @@
-# ohmypi Android: build plan
+# Omai (ohmypi Android client): build plan
+
+> Renamed from "ohmypi" to **Omai** for a public release: Dart package `omai`,
+> app id `us.snakepit.omai`, label "Omai". The gateway it talks to is still ohmypi.
 
 Flutter client for the ohmypi gateway (`~/projects/ohmypi-gateway`). It mirrors
 the Svelte web dashboard (`web/` in that repo) and is built for the phone
@@ -48,7 +51,7 @@ disagree, stop and report.
   renderer, a highlighter, a local cache (sqlite or hive), a foreground-service
   plugin, local notifications, share intent receiver.
 - minSdk 26, target/compile from Flutter defaults (36). App id
-  `us.snakepit.ohmypi`, label "ohmypi".
+  `us.snakepit.omai`, label "Omai" (originally `us.snakepit.ohmypi`, renamed).
 
 ## Layout
 

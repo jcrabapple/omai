@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/transcript/changes.dart';
-import 'package:ohmypi/transcript/diff.dart';
-import 'package:ohmypi/transcript/items.dart';
-import 'package:ohmypi/transcript/reducer.dart';
+import 'package:omai/transcript/changes.dart';
+import 'package:omai/transcript/diff.dart';
+import 'package:omai/transcript/items.dart';
+import 'package:omai/transcript/reducer.dart';
 
 void main() {
   final edits = jsonDecode(File('test/fixtures/transcript/edits.json').readAsStringSync())

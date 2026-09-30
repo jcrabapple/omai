@@ -9,15 +9,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:ohmypi/api/client.dart';
-import 'package:ohmypi/features/session/changes_page.dart';
-import 'package:ohmypi/state/connection_notifier.dart';
-import 'package:ohmypi/state/connection_store.dart';
-import 'package:ohmypi/state/reviewed_store.dart';
-import 'package:ohmypi/state/session_controller.dart';
-import 'package:ohmypi/stream/scheduler.dart';
-import 'package:ohmypi/stream/session_stream.dart';
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/api/client.dart';
+import 'package:omai/features/session/changes_page.dart';
+import 'package:omai/state/connection_notifier.dart';
+import 'package:omai/state/connection_store.dart';
+import 'package:omai/state/reviewed_store.dart';
+import 'package:omai/state/session_controller.dart';
+import 'package:omai/stream/scheduler.dart';
+import 'package:omai/stream/session_stream.dart';
+import 'package:omai/theme/presets.dart';
 
 import '../../stream/fakes.dart';
 

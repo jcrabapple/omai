@@ -8,9 +8,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/composer/images.dart';
-import 'package:ohmypi/features/session/image_tray.dart';
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/composer/images.dart';
+import 'package:omai/features/session/image_tray.dart';
+import 'package:omai/theme/presets.dart';
 
 // A real 1x1 PNG so Image.memory decodes in tests.
 final pngBytes = Uint8List.fromList(base64Decode(

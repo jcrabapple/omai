@@ -6,11 +6,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/api/models.dart';
-import 'package:ohmypi/features/palette/palette_sheet.dart';
-import 'package:ohmypi/palette/palette.dart';
-import 'package:ohmypi/state/sessions_store.dart';
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/api/models.dart';
+import 'package:omai/features/palette/palette_sheet.dart';
+import 'package:omai/palette/palette.dart';
+import 'package:omai/state/sessions_store.dart';
+import 'package:omai/theme/presets.dart';
 
 class _Actions implements PaletteActions {
   final List<String> opened = [];

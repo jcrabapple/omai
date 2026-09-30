@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/stream/session_stream.dart';
+import 'package:omai/stream/session_stream.dart';
 
 Future<HttpServer> _serveClosing(int code, {List<String>? seenAuth}) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

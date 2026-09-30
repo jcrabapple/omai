@@ -2,10 +2,10 @@
 // web/src/components/__tests__/PlanPanel.test.ts.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/features/session/plan_panel.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/transcript/items.dart';
-import 'package:ohmypi/transcript/plan.dart';
+import 'package:omai/features/session/plan_panel.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/transcript/items.dart';
+import 'package:omai/transcript/plan.dart';
 
 const plan = <Object?>[
   {

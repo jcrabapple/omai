@@ -7,8 +7,8 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/api/errors.dart';
-import 'package:ohmypi/features/settings/diagnostics.dart';
+import 'package:omai/api/errors.dart';
+import 'package:omai/features/settings/diagnostics.dart';
 
 Diagnostics makeDiagnostics({
   Object? gateway = true,

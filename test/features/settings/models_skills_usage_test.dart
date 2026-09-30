@@ -5,10 +5,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/features/settings/models_page.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/features/settings/skills_page.dart';
-import 'package:ohmypi/features/settings/usage_page.dart';
+import 'package:omai/features/settings/models_page.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/features/settings/skills_page.dart';
+import 'package:omai/features/settings/usage_page.dart';
 
 import 'fakes.dart';
 

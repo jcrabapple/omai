@@ -2,8 +2,8 @@
 // become span/style assertions with the same inputs.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/render/ansi.dart';
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/render/ansi.dart';
+import 'package:omai/theme/presets.dart';
 
 const e = '\x1b[';
 

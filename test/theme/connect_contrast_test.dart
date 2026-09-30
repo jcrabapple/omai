@@ -10,7 +10,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/theme/presets.dart';
 
 double _channelFrac(int v) {
   final c = v / 255.0;

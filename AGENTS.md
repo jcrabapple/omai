@@ -1,6 +1,7 @@
-# ohmypi-android: rules for coding agents
+# Omai (ohmypi-android): rules for coding agents
 
-Flutter Android client for the ohmypi gateway. Read `docs/PLAN.md` first: it
+Omai is the Flutter Android client for the ohmypi gateway. The app is named
+Omai, never "ohmypi"; Dart package `omai`, app id `us.snakepit.omai`. Read `docs/PLAN.md` first: it
 holds the task you are on, the file ownership for that task, and the sources
 of truth. The gateway repo is `~/projects/ohmypi-gateway`; its `docs/API.md`
 is the wire contract and `web/src/lib/**` is the behaviour spec you port.

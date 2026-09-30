@@ -1,9 +1,9 @@
 // Widget tests for UserBubble, ported from the web component's states.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/transcript/items.dart';
-import 'package:ohmypi/widgets/items/user_bubble.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/transcript/items.dart';
+import 'package:omai/widgets/items/user_bubble.dart';
 
 import '../pump_omp.dart';
 

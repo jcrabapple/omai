@@ -7,9 +7,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart' show Brightness;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/state/appearance_store.dart';
-import 'package:ohmypi/state/reviewed_store.dart';
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/state/appearance_store.dart';
+import 'package:omai/state/reviewed_store.dart';
+import 'package:omai/theme/presets.dart';
 
 class MemoryKv implements ReviewedKv {
   final Map<String, String> map = {};

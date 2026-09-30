@@ -1,7 +1,7 @@
 // Ported from web/src/lib/transcript/__tests__/blocks.test.ts.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/transcript/blocks.dart';
-import 'package:ohmypi/transcript/items.dart';
+import 'package:omai/transcript/blocks.dart';
+import 'package:omai/transcript/items.dart';
 
 ToolItem tool(String id, [String status = 'done']) => ToolItem(
       id: id,

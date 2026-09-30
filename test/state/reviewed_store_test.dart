@@ -4,9 +4,9 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/state/connection_notifier.dart';
-import 'package:ohmypi/state/connection_store.dart';
-import 'package:ohmypi/state/reviewed_store.dart';
+import 'package:omai/state/connection_notifier.dart';
+import 'package:omai/state/connection_store.dart';
+import 'package:omai/state/reviewed_store.dart';
 
 /// In-memory stand-in for device storage, with per-key gates so tests can
 /// hold loads in flight.

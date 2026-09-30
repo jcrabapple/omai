@@ -1,7 +1,7 @@
 // Ported from web/src/lib/palette/__tests__/fuzzy.test.ts.
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/palette/fuzzy.dart';
+import 'package:omai/palette/fuzzy.dart';
 
 void main() {
   group('fuzzyScore', () {

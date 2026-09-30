@@ -66,7 +66,7 @@ class _ConnectScreenState extends ConsumerState<ConnectScreen> {
     final result = state.testResult;
 
     return OmpPage(
-      title: 'Connect to ohmypi',
+      title: 'Connect to a gateway',
       // No Center wrapper: it vertically centered the form and left a large
       // empty band under the title. The list starts right under the bar.
       child: ConstrainedBox(

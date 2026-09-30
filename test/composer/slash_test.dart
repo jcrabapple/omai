@@ -1,10 +1,10 @@
 // Port of web/src/lib/composer/__tests__/slash.test.ts, plus the SlashCommand
 // tolerant parse and the modes/approval helpers the composer uses.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/composer/approval.dart';
-import 'package:ohmypi/composer/modes.dart';
-import 'package:ohmypi/composer/slash.dart';
-import 'package:ohmypi/wire/wire.dart';
+import 'package:omai/composer/approval.dart';
+import 'package:omai/composer/modes.dart';
+import 'package:omai/composer/slash.dart';
+import 'package:omai/wire/wire.dart';
 
 SlashCommand cmd(String name,
         {String description = '',

@@ -3,8 +3,8 @@
 // overflow button opens the same menu without selecting.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/transcript/items.dart';
-import 'package:ohmypi/widgets/items/assistant_message.dart';
+import 'package:omai/transcript/items.dart';
+import 'package:omai/widgets/items/assistant_message.dart';
 
 import '../pump_omp.dart';
 

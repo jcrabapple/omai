@@ -5,7 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/composer/images.dart';
+import 'package:omai/composer/images.dart';
 
 Uint8List _bytes(List<int> l) => Uint8List.fromList(l);
 

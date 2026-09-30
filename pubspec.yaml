@@ -1,5 +1,5 @@
-name: ohmypi
-description: "Android client for the ohmypi gateway"
+name: omai
+description: "Omai: Android client for the ohmypi gateway"
 publish_to: 'none'
 
 version: 0.1.0+1

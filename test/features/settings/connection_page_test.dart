@@ -4,9 +4,9 @@
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/features/settings/connection_page.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/state/connection_notifier.dart';
+import 'package:omai/features/settings/connection_page.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/state/connection_notifier.dart';
 
 import 'fakes.dart';
 

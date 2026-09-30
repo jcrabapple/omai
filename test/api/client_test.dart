@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:ohmypi/api/client.dart';
-import 'package:ohmypi/api/errors.dart';
+import 'package:omai/api/client.dart';
+import 'package:omai/api/errors.dart';
 
 http.Response _json(Object? body, {int status = 200, Map<String, String> headers = const {}}) {
   return http.Response(jsonEncode(body), status,

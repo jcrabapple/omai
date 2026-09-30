@@ -1,6 +1,6 @@
 // Ports of web/src/lib/composer/__tests__/send.test.ts.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/transcript/send.dart';
+import 'package:omai/transcript/send.dart';
 
 void main() {
   group('send plan', () {

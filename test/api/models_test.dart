@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/api/models.dart';
+import 'package:omai/api/models.dart';
 
 void main() {
   group('SessionInfo', () {

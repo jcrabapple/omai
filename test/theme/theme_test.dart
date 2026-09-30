@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/theme/tokens.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/theme/tokens.dart';
 
 void main() {
   group('presets', () {

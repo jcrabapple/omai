@@ -1,4 +1,4 @@
-package us.snakepit.ohmypi
+package us.snakepit.omai
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -27,12 +27,12 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     companion object {
-        const val CHANNEL_NAME = "us.snakepit.ohmypi/native"
+        const val CHANNEL_NAME = "us.snakepit.omai/native"
 
-        const val ACTION_SHORTCUT = "us.snakepit.ohmypi.action.SHORTCUT"
+        const val ACTION_SHORTCUT = "us.snakepit.omai.action.SHORTCUT"
 
         /** App-private navigation action: notification taps only (review #9). */
-        const val ACTION_OPEN_SESSION = "us.snakepit.ohmypi.action.OPEN_SESSION"
+        const val ACTION_OPEN_SESSION = "us.snakepit.omai.action.OPEN_SESSION"
         const val EXTRA_ROUTE = "route"
         const val EXTRA_GW_ID = "gwId"
         const val EXTRA_REQUEST_ID = "requestId"
@@ -104,7 +104,7 @@ class MainActivity : FlutterActivity() {
          * The FlutterActivity OWNS its engine: when it is destroyed the Dart
          * isolate dies with it, so the keep-alive cannot outlive the engine
          * and must not pretend to (review #3). Called with the engine gone:
-         * stop the service and cancel every ohmypi notification, so no dead
+         * stop the service and cancel every Omai notification, so no dead
          * Approve / Stop buttons stay in the drawer.
          */
         fun tearDownKeepalive(context: Context) {

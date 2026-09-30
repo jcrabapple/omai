@@ -1,6 +1,6 @@
 // Ported from web/src/lib/render/__tests__/diff2.test.ts. Every case kept.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/transcript/diff.dart';
+import 'package:omai/transcript/diff.dart';
 
 void main() {
   group('parseOmpDiff', () {

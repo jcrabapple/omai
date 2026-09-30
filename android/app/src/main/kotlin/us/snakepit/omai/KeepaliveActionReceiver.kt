@@ -1,4 +1,4 @@
-package us.snakepit.ohmypi
+package us.snakepit.omai
 
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -22,8 +22,8 @@ import androidx.core.app.NotificationManagerCompat
 class KeepaliveActionReceiver : BroadcastReceiver() {
 
     companion object {
-        const val ACTION_STOP = "us.snakepit.ohmypi.action.KEEPALIVE_BUTTON_STOP"
-        const val ACTION_APPROVAL = "us.snakepit.ohmypi.action.KEEPALIVE_BUTTON_APPROVAL"
+        const val ACTION_STOP = "us.snakepit.omai.action.KEEPALIVE_BUTTON_STOP"
+        const val ACTION_APPROVAL = "us.snakepit.omai.action.KEEPALIVE_BUTTON_APPROVAL"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -82,8 +82,8 @@ class KeepaliveActionReceiver : BroadcastReceiver() {
         )
         val notification = NotificationCompat.Builder(context, KeepaliveService.CHANNEL_APPROVALS)
             .setSmallIcon(R.drawable.ic_stat_pi)
-            .setContentTitle("ohmypi needs you")
-            .setContentText("Open ohmypi to answer")
+            .setContentTitle("Omai needs you")
+            .setContentText("Open Omai to answer")
             .setContentIntent(open)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)

@@ -8,13 +8,13 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/api/errors.dart';
-import 'package:ohmypi/features/settings/diagnostics.dart';
-import 'package:ohmypi/state/connection_notifier.dart';
-import 'package:ohmypi/state/connection_store.dart';
-import 'package:ohmypi/state/sessions_store.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/features/settings/diagnostics_page.dart';
+import 'package:omai/api/errors.dart';
+import 'package:omai/features/settings/diagnostics.dart';
+import 'package:omai/state/connection_notifier.dart';
+import 'package:omai/state/connection_store.dart';
+import 'package:omai/state/sessions_store.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/features/settings/diagnostics_page.dart';
 
 class _FixedTokenStore implements TokenStore {
   @override

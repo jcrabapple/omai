@@ -3,9 +3,9 @@
 
 import 'dart:async';
 
-import 'package:ohmypi/composer/approval.dart';
-import 'package:ohmypi/native/keepalive.dart';
-import 'package:ohmypi/wire/wire.dart';
+import 'package:omai/composer/approval.dart';
+import 'package:omai/native/keepalive.dart';
+import 'package:omai/wire/wire.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class RecordedCall {

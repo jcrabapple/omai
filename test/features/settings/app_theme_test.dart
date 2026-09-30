@@ -6,12 +6,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/app/app.dart';
-import 'package:ohmypi/state/appearance_store.dart';
-import 'package:ohmypi/state/connection_notifier.dart';
-import 'package:ohmypi/state/reviewed_store.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/theme/tokens.dart';
+import 'package:omai/app/app.dart';
+import 'package:omai/state/appearance_store.dart';
+import 'package:omai/state/connection_notifier.dart';
+import 'package:omai/state/reviewed_store.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/theme/tokens.dart';
 
 import 'fakes.dart';
 

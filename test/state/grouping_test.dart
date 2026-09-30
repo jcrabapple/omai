@@ -1,7 +1,7 @@
 // Ported from web/src/lib/state/__tests__/grouping.test.ts.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/api/models.dart';
-import 'package:ohmypi/state/grouping.dart';
+import 'package:omai/api/models.dart';
+import 'package:omai/state/grouping.dart';
 
 final now = DateTime(2026, 9, 29, 15, 0, 0);
 

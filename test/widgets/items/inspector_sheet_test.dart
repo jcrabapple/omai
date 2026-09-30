@@ -7,8 +7,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/theme/presets.dart';
-import 'package:ohmypi/widgets/items/inspector_sheet.dart';
+import 'package:omai/theme/presets.dart';
+import 'package:omai/widgets/items/inspector_sheet.dart';
 
 Future<void> _pump(WidgetTester tester, Object? raw) async {
   await tester.pumpWidget(

@@ -1,4 +1,4 @@
-package us.snakepit.ohmypi
+package us.snakepit.omai
 
 import android.app.PendingIntent
 import android.app.Service
@@ -31,8 +31,8 @@ class KeepaliveService : Service() {
         const val CHANNEL_RUNNING = "keepalive_running"
         const val CHANNEL_APPROVALS = "approvals"
 
-        const val ACTION_UPDATE = "us.snakepit.ohmypi.action.KEEPALIVE_UPDATE"
-        const val ACTION_STOP = "us.snakepit.ohmypi.action.KEEPALIVE_STOP"
+        const val ACTION_UPDATE = "us.snakepit.omai.action.KEEPALIVE_UPDATE"
+        const val ACTION_STOP = "us.snakepit.omai.action.KEEPALIVE_STOP"
 
         const val NOTIFICATION_ID = 42
 

@@ -6,9 +6,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/transcript/items.dart';
-import 'package:ohmypi/transcript/reducer.dart';
-import 'package:ohmypi/wire/wire.dart';
+import 'package:omai/transcript/items.dart';
+import 'package:omai/transcript/reducer.dart';
+import 'package:omai/wire/wire.dart';
 
 List<Map<String, Object?>> fixture(String name) =>
     (jsonDecode(File('test/fixtures/transcript/$name').readAsStringSync()) as List)

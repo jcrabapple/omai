@@ -3,8 +3,8 @@
 // 6 settings pages, not the web's 7: the app has no Agent config page.
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/api/models.dart';
-import 'package:ohmypi/palette/palette.dart';
+import 'package:omai/api/models.dart';
+import 'package:omai/palette/palette.dart';
 
 class _Actions implements PaletteActions {
   String? openedSession;

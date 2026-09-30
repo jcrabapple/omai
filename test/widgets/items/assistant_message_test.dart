@@ -2,12 +2,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
-import 'package:ohmypi/transcript/items.dart';
-import 'package:ohmypi/widgets/items/assistant_message.dart';
-import 'package:ohmypi/widgets/items/message_actions.dart';
+import 'package:omai/transcript/items.dart';
+import 'package:omai/widgets/items/assistant_message.dart';
+import 'package:omai/widgets/items/message_actions.dart';
 
 import '../pump_omp.dart';
-import 'package:ohmypi/theme/presets.dart';
+import 'package:omai/theme/presets.dart';
 
 AssistantItem item({
   String text = '',

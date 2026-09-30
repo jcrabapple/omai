@@ -3,8 +3,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:ohmypi/stream/scheduler.dart';
-import 'package:ohmypi/stream/session_stream.dart';
+import 'package:omai/stream/scheduler.dart';
+import 'package:omai/stream/session_stream.dart';
 
 class FakeScheduler implements Scheduler {
   FakeScheduler({DateTime? start})

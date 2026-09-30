@@ -2,7 +2,7 @@
 // use in Composer.svelte): survives the provider going away, keyed per
 // connection + session, cleared on successful send, whitespace clears.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/composer/drafts.dart';
+import 'package:omai/composer/drafts.dart';
 
 class MemoryDraftKv implements DraftKv {
   final map = <String, String>{};

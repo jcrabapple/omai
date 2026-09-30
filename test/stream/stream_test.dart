@@ -5,8 +5,8 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/stream/session_stream.dart';
-import 'package:ohmypi/wire/wire.dart';
+import 'package:omai/stream/session_stream.dart';
+import 'package:omai/wire/wire.dart';
 
 import 'fakes.dart';
 

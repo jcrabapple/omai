@@ -2,7 +2,7 @@
 // string/number work; session-title helpers read web API types and stay web
 // side). Extra coverage for the helpers the transcript uses directly.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ohmypi/format.dart';
+import 'package:omai/format.dart';
 
 void main() {
   group('contextLevel', () {

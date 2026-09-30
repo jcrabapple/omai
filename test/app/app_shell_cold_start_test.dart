@@ -10,17 +10,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:ohmypi/api/client.dart';
-import 'package:ohmypi/app/app.dart';
-import 'package:ohmypi/composer/drafts.dart';
-import 'package:ohmypi/features/session/session_screen.dart';
-import 'package:ohmypi/state/connection_notifier.dart';
-import 'package:ohmypi/state/connection_store.dart';
-import 'package:ohmypi/state/reviewed_store.dart';
-import 'package:ohmypi/state/session_controller.dart';
-import 'package:ohmypi/state/sessions_store.dart';
-import 'package:ohmypi/stream/scheduler.dart';
-import 'package:ohmypi/stream/session_stream.dart';
+import 'package:omai/api/client.dart';
+import 'package:omai/app/app.dart';
+import 'package:omai/composer/drafts.dart';
+import 'package:omai/features/session/session_screen.dart';
+import 'package:omai/state/connection_notifier.dart';
+import 'package:omai/state/connection_store.dart';
+import 'package:omai/state/reviewed_store.dart';
+import 'package:omai/state/session_controller.dart';
+import 'package:omai/state/sessions_store.dart';
+import 'package:omai/stream/scheduler.dart';
+import 'package:omai/stream/session_stream.dart';
 
 import '../stream/fakes.dart';
 
@@ -136,7 +136,7 @@ void main() {
 
       // The cold-start intent: a notification tap for session abc.
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        const MethodChannel('us.snakepit.ohmypi/native'),
+        const MethodChannel('us.snakepit.omai/native'),
         (call) async {
           if (call.method == 'getInitialIntent') {
             return {'type': 'openSession', 'gwId': 'abc'};
@@ -147,7 +147,7 @@ void main() {
       );
       addTearDown(() {
         tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-          const MethodChannel('us.snakepit.ohmypi/native'),
+          const MethodChannel('us.snakepit.omai/native'),
           null,
         );
       });
@@ -162,7 +162,7 @@ void main() {
       // but it also cannot navigate yet.
       expect(find.byType(SessionScreen), findsNothing);
       expect(
-        find.text('Connect to ohmypi'),
+        find.text('Connect to a gateway'),
         findsOneWidget,
         reason: 'still on the connect screen while credentials load',
       );

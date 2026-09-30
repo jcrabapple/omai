@@ -9,7 +9,7 @@ class MethodChannelKeepaliveSurface implements KeepaliveSurface {
   const MethodChannelKeepaliveSurface();
 
   static const MethodChannel channel = MethodChannel(
-    'us.snakepit.ohmypi/native',
+    'us.snakepit.omai/native',
   );
 
   @override
