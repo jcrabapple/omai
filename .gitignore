@@ -49,3 +49,6 @@ app.*.map.json
 # local
 /build/
 .dart_tool/
+
+# Release APKs from dev/release.sh
+/dist/

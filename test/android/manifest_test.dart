@@ -7,7 +7,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  final main = File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+  final main = File('android/app/src/main/AndroidManifest.xml')
+      .readAsStringSync();
 
   test('the main manifest declares INTERNET (release builds need it)', () {
     expect(
@@ -20,4 +21,38 @@ void main() {
     expect(main, isNot(contains('usesCleartextTraffic="true"')));
     expect(main, isNot(contains('networkSecurityConfig')));
   });
+
+  test(
+    'the launcher label comes from app_name: Omai, and Omai Debug in debug',
+    () {
+      expect(main, contains('android:label="@string/app_name"'));
+      expect(
+        File('android/app/src/main/res/values/strings.xml').readAsStringSync(),
+        contains('<string name="app_name">Omai</string>'),
+      );
+      expect(
+        File('android/app/src/debug/res/values/strings.xml').readAsStringSync(),
+        contains('<string name="app_name">Omai Debug</string>'),
+      );
+    },
+  );
+
+  test(
+    'debug shortcuts are the main shortcuts retargeted to the .debug package',
+    () {
+      String body(String s) => s.substring(s.indexOf('<shortcuts'));
+      final m = File('android/app/src/main/res/xml/shortcuts.xml')
+          .readAsStringSync();
+      final d = File('android/app/src/debug/res/xml/shortcuts.xml')
+          .readAsStringSync();
+      expect(m, contains('android:targetPackage="us.snakepit.omai"'));
+      expect(
+        body(d),
+        body(m).replaceAll(
+          'android:targetPackage="us.snakepit.omai"',
+          'android:targetPackage="us.snakepit.omai.debug"',
+        ),
+      );
+    },
+  );
 }

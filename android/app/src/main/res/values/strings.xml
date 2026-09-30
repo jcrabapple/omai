@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- src/debug/res/values/strings.xml overrides this with "Omai Debug". -->
+    <string name="app_name">Omai</string>
     <!-- Task F: notification Stop button and launcher shortcut labels. -->
     <string name="keepalive_stop">Stop</string>
     <string name="shortcut_new_session">New session</string>

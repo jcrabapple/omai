@@ -2,4 +2,8 @@
 <resources>
     <!-- Task F: adaptive launcher icon background, the terminal preset bg. -->
     <color name="ic_launcher_background">#FF0A0D0B</color>
+    <!-- Launch window + Android 12+ splash: the paper (light) and terminal
+         (dark, values-night) preset backgrounds, so there's no white or black
+         flash before Flutter's first frame. -->
+    <color name="launch_bg">#FFF3F1EC</color>
 </resources>
