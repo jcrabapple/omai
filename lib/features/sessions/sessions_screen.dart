@@ -19,6 +19,9 @@ import '../../api/errors.dart';
 import '../../api/models.dart';
 import '../../app/app.dart';
 import '../../features/new_session/new_session_sheet.dart';
+import '../../features/palette/palette_sheet.dart';
+import '../../features/settings/settings_screen.dart';
+import '../../palette/palette.dart';
 import '../../format.dart';
 import '../../state/connection_notifier.dart';
 import '../../state/grouping.dart';
@@ -150,6 +153,19 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
         foregroundColor: tokens.ink,
         elevation: 0,
         actions: [
+          IconButton(
+            tooltip: 'Search',
+            icon: const Icon(Icons.search),
+            onPressed: () => showPaletteSheet(
+              context,
+              actions: _SessionsPaletteActions(this),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => _openSettings(),
+          ),
           PopupMenuButton<String>(
             tooltip: 'More options',
             icon: const Icon(Icons.more_vert),
@@ -304,6 +320,23 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       basename(s.cwd),
       model,
     ].where((p) => p != null && p.isNotEmpty).join(' · ');
+  }
+
+  void _openSettings([SettingsPage? page]) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => SettingsScreen(initial: page)),
+    );
+  }
+
+  /// The first live session waiting on the user, oldest first in list order.
+  void _nextAttention() {
+    final live = ref.read(sessionsStoreProvider).live;
+    for (final s in live) {
+      if (!s.exited && s.pendingUi.isNotEmpty) {
+        _openSession(s.gwId);
+        return;
+      }
+    }
   }
 
   void _openSession(String gwId) {
@@ -593,3 +626,46 @@ class _ErrorBanner extends StatelessWidget {
 // Imported late to avoid a circular import at the top: the app module owns
 // the route observer the screen subscribes to.
 // (SessionScreenRoute lives in session_screen.dart.)
+
+/// Palette actions from the sessions screen. Page ids are the palette's
+/// string ids ('appearance', ...), mapped onto [SettingsPage] by name.
+class _SessionsPaletteActions implements PaletteActions {
+  _SessionsPaletteActions(this._screen);
+
+  final _SessionsScreenState _screen;
+
+  @override
+  void newSession() {
+    if (!_screen.mounted) return;
+    showNewSessionSheet(
+      _screen.context,
+      _screen.ref,
+      onCreated: _screen._onSessionStarted,
+    );
+  }
+
+  @override
+  void nextAttention() {
+    if (_screen.mounted) _screen._nextAttention();
+  }
+
+  @override
+  void openSession(String gwId) {
+    if (_screen.mounted) _screen._openSession(gwId);
+  }
+
+  @override
+  void resume(SavedSession s) {
+    if (_screen.mounted) unawaited(_screen._resume(s));
+  }
+
+  @override
+  void openSettings(String page) {
+    if (!_screen.mounted) return;
+    SettingsPage? target;
+    for (final p in SettingsPage.values) {
+      if (p.name == page) target = p;
+    }
+    _screen._openSettings(target);
+  }
+}

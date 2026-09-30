@@ -14,32 +14,10 @@ import '../features/new_session/new_session_sheet.dart';
 import '../features/session/session_screen.dart';
 import '../features/sessions/sessions_screen.dart';
 import '../native/keepalive.dart';
+import '../state/appearance_store.dart';
 import '../state/connection_notifier.dart';
 import '../theme/presets.dart';
 import '../theme/tokens.dart';
-
-/// The dark preset used when the system is in dark mode. Settings will own
-/// this later; terminal is the default today.
-class DarkPresetNotifier extends Notifier<OmpPreset> {
-  @override
-  OmpPreset build() => OmpPreset.terminal;
-  void set(OmpPreset p) => state = p;
-}
-
-final darkPresetProvider = NotifierProvider<DarkPresetNotifier, OmpPreset>(
-  DarkPresetNotifier.new,
-);
-
-/// Custom accent override from settings; null keeps the preset accent.
-class AccentOverrideNotifier extends Notifier<Color?> {
-  @override
-  Color? build() => null;
-  void set(Color? c) => state = c;
-}
-
-final accentOverrideProvider = NotifierProvider<AccentOverrideNotifier, Color?>(
-  AccentOverrideNotifier.new,
-);
 
 /// The sessions screen subscribes to this so polling runs only while it is
 /// the top route.
@@ -235,21 +213,73 @@ class _OmpAppState extends ConsumerState<OmpApp> {
   @override
   Widget build(BuildContext context) {
     final connection = ref.watch(connectionNotifierProvider);
-    final darkPreset = ref.watch(darkPresetProvider);
-    final accent = ref.watch(accentOverrideProvider);
+    final appearance = ref.watch(appearanceProvider);
+    final accent = appearance.accentHex == null
+        ? null
+        : Color(int.parse('FF${appearance.accentHex!.substring(1)}', radix: 16));
+    final density = appearance.density.visualDensity;
 
     return MaterialApp(
       title: 'ohmypi',
       navigatorKey: _rootNavigatorKey,
-      theme: OmpTheme.data(OmpPreset.paper, accent: accent),
-      darkTheme: OmpTheme.data(darkPreset, accent: accent),
-      themeMode: ThemeMode.system,
+      // Follow system on: paper when the device is light, the chosen dark
+      // preset otherwise (a paper choice uses terminal on the dark side).
+      theme: OmpTheme.data(OmpPreset.paper, accent: accent, visualDensity: density),
+      darkTheme: OmpTheme.data(
+        appearance.effectivePreset(Brightness.dark),
+        accent: accent,
+        visualDensity: density,
+      ),
+      themeMode: appearance.followSystem
+          ? ThemeMode.system
+          : (appearance.preset.isLight ? ThemeMode.light : ThemeMode.dark),
       navigatorObservers: [ompRouteObserver],
+      // Text size setting multiplies the system text scaler instead of
+      // replacing it, so the OS font size still works underneath.
+      builder: (context, child) {
+        if (child == null) return const SizedBox.shrink();
+        final mq = MediaQuery.of(context);
+        return MediaQuery(
+          data: mq.copyWith(
+            textScaler: ScaledTextScaler(
+              mq.textScaler,
+              appearance.textScale,
+            ),
+          ),
+          child: child,
+        );
+      },
       home: connection.signedIn
           ? const SessionsScreen()
           : const ConnectScreen(),
     );
   }
+}
+
+/// [base] with every scale multiplied by [factor]. The system font size
+/// setting keeps working underneath the appearance text-size setting.
+class ScaledTextScaler extends TextScaler {
+  const ScaledTextScaler(this.base, this.factor) : assert(factor > 0);
+
+  final TextScaler base;
+  final double factor;
+
+  @override
+  double scale(double fontSize) => base.scale(fontSize) * factor;
+
+  @override
+  // The abstract member still requires it; the base scaler supplies it.
+  // ignore: deprecated_member_use
+  double get textScaleFactor => base.textScaleFactor * factor;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ScaledTextScaler &&
+      other.base == base &&
+      other.factor == factor;
+
+  @override
+  int get hashCode => Object.hash(base, factor);
 }
 
 /// Shared page scaffold so feature screens stay consistent.

@@ -133,11 +133,14 @@ class OmpTheme {
   }
 
   /// Material [ThemeData] for a preset, tokens attached as a [ThemeExtension].
-  static ThemeData data(OmpPreset preset, {Color? accent}) {
+  /// [visualDensity] is the settings density plumbing (compact setting);
+  /// null keeps Material's default.
+  static ThemeData data(OmpPreset preset, {Color? accent, VisualDensity? visualDensity}) {
     final t = tokens(preset, accent: accent);
     final scheme = OmpTheme.scheme(t);
     return ThemeData(
       useMaterial3: true,
+      visualDensity: visualDensity,
       colorScheme: scheme,
       scaffoldBackgroundColor: t.bg,
       canvasColor: t.bg,

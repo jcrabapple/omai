@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:ohmypi/features/settings/settings_screen.dart';
 import 'package:ohmypi/api/client.dart';
 import 'package:ohmypi/app/app.dart';
 import 'package:ohmypi/composer/drafts.dart';
@@ -131,6 +132,8 @@ ProviderContainer _container(ScriptableGateway gateway) {
         ]),
       ),
       tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
+      // Opening a session reads its draft.
+      draftKvProvider.overrideWithValue(_MemoryDraftKv()),
       // A 5 s poll reschedules frames forever and pumpAndSettle never settles.
       sessionsPollIntervalProvider.overrideWithValue(const Duration(hours: 1)),
       gatewayClientFactoryProvider.overrideWith(
@@ -281,18 +284,30 @@ void main() {
 
     final semantics = tester
         .widgetList<Semantics>(
-          find.ancestor(of: find.text('Prompter'), matching: find.byType(Semantics)),
+          find.ancestor(
+            of: find.text('Prompter'),
+            matching: find.byType(Semantics),
+          ),
         )
         .where((w) => (w.properties.label ?? '').isNotEmpty)
         .first;
     final props = semantics.properties;
     expect(props.label, contains('Prompter'));
-    expect(props.label, contains('mystery'),
-        reason: 'unmapped statuses fall back to the raw value');
-    expect(props.label, isNot(contains('null')),
-        reason: 'missing status must not interpolate as "null"');
-    expect(semantics.excludeSemantics, isTrue,
-        reason: 'the row is announced once, not re-read child by child');
+    expect(
+      props.label,
+      contains('mystery'),
+      reason: 'unmapped statuses fall back to the raw value',
+    );
+    expect(
+      props.label,
+      isNot(contains('null')),
+      reason: 'missing status must not interpolate as "null"',
+    );
+    expect(
+      semantics.excludeSemantics,
+      isTrue,
+      reason: 'the row is announced once, not re-read child by child',
+    );
   });
 
   testWidgets('a first-load failure shows the error as the body with Retry', (
@@ -445,5 +460,68 @@ void main() {
       ),
     );
     await tester.pump(const Duration(seconds: 1));
+  });
+
+  group('app bar entry points', () {
+    Future<ProviderContainer> open(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final gateway = ScriptableGateway(
+        payload: {
+          'live': [
+            liveJson(gwId: 'idle', cwd: '/work/calm'),
+            liveJson(
+              gwId: 'need',
+              cwd: '/work/waiting',
+              pendingUi: [
+                {'id': 'u1', 'method': 'select'},
+              ],
+            ),
+          ],
+          'saved': [],
+        },
+      );
+      final container = _container(gateway);
+      addTearDown(container.dispose);
+      await _pump(tester, container);
+      return container;
+    }
+
+    testWidgets('Search opens the palette, and a Settings item opens that '
+        'settings page', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Search'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsWidgets);
+
+      await tester.enterText(find.byType(TextField).first, 'diagnostics');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Diagnostics settings').first);
+      await tester.pumpAndSettle();
+      expect(find.byType(SettingsScreen), findsOneWidget);
+      final screen = tester.widget<SettingsScreen>(find.byType(SettingsScreen));
+      expect(screen.initial, SettingsPage.diagnostics);
+    });
+
+    testWidgets('the palette\'s needs-you action opens the waiting session', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Search'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Next session that needs you').first);
+      await tester.pumpAndSettle();
+      final screen = tester.widget<SessionScreen>(find.byType(SessionScreen));
+      expect(screen.gwId, 'need');
+    });
+
+    testWidgets('the Settings button opens the settings list', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      final screen = tester.widget<SettingsScreen>(find.byType(SettingsScreen));
+      expect(screen.initial, isNull);
+    });
   });
 }

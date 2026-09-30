@@ -1,8 +1,9 @@
-// The composer, ported from web/src/components/Composer.svelte (text parts;
-// images are TODO(E)). Auto-grow multiline field (Enter inserts a newline on
+// The composer, ported from web/src/components/Composer.svelte (text parts
+// plus the image parts: attach, keyboard insertion, tray, images-only send,
+// restore on failure). Auto-grow multiline field (Enter inserts a newline on
 // touch), send button; while the turn runs a split action Steer / Queue /
-// Stop. Durable send: the text stays in the field (and the draft) until the
-// gateway acks; on failure the failed bubble offers Retry.
+// Stop. Durable send: the text and the tray stay until the gateway acks; on
+// failure the failed bubble offers Retry.
 //
 // While a blocking dialog is open the approval panel replaces this widget
 // entirely (see approval_panel.dart).
@@ -12,17 +13,56 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../composer/drafts.dart';
+import '../../composer/images.dart';
 import '../../composer/slash.dart';
 import '../../state/connection_notifier.dart';
 import '../../state/session_controller.dart';
 import '../../theme/tokens.dart';
 import '../../transcript/send.dart' show sendPlan, PromptMode;
+import 'image_tray.dart';
 import 'slash_menu.dart';
 
 /// The composer grows with its text up to this many lines, then scrolls.
 const composerMaxLines = 5;
+
+/// Where the attach sheet can pull images from.
+enum ImagePickSource { gallery, camera }
+
+/// Decoded picks: bytes plus the source's claimed mime (may be null).
+typedef PickedImages = List<(Uint8List, String?)>;
+
+/// Injectable seam for the platform picker, so widget tests never touch the
+/// plugin channel.
+typedef PickImagesFn = Future<PickedImages> Function(ImagePickSource source);
+Future<PickedImages> _pickWithPlugin(ImagePickSource source) async {
+  final picker = ImagePicker();
+  // Downscale so a phone photo lands well under the 5 MB decoded limit.
+  if (source == ImagePickSource.camera) {
+    final file = await picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 2048,
+      maxHeight: 2048,
+      imageQuality: 85,
+    );
+    if (file == null) return const [];
+    return [(await file.readAsBytes(), file.mimeType)];
+  }
+  final files = await picker.pickMultiImage(
+    maxWidth: 2048,
+    maxHeight: 2048,
+    imageQuality: 85,
+  );
+  final out = <(Uint8List, String?)>[];
+  for (final file in files) {
+    out.add((await file.readAsBytes(), file.mimeType));
+  }
+  return out;
+}
+
+PickImagesFn pickImagesForComposer = _pickWithPlugin;
 
 class SessionComposer extends ConsumerStatefulWidget {
   const SessionComposer({super.key, required this.gwId});
@@ -39,6 +79,12 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
 
   bool _sending = false;
   bool _draftLoaded = false;
+
+  // Attached images (E2b): tray contents, id source, and the current
+  // validation problem shown inline under the tray.
+  final List<AttachedImage> _images = [];
+  int _nextImageId = 1;
+  String? _imageProblem;
 
   // Slash menu state.
   String? _dismissedFor;
@@ -107,22 +153,86 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     await saveDraft(kv, _connId, widget.gwId, _text.text);
   }
 
+  // ------------------------------------------------------------- images
+
+  Future<void> _addImageBytes(PickedImages picks) async {
+    String? problem;
+    final added = <AttachedImage>[];
+    for (final (bytes, declared) in picks) {
+      problem = imageProblem(
+        bytes,
+        attached: _images.length + added.length,
+        declaredMime: declared,
+      );
+      if (problem != null) break;
+      added.add(AttachedImage(
+        id: _nextImageId++,
+        bytes: bytes,
+        mimeType: sniffImageMime(bytes)!,
+      ));
+    }
+    if (!mounted) return;
+    setState(() {
+      _images.addAll(added);
+      // Any change clears the previous problem; a new one replaces it.
+      _imageProblem = problem;
+    });
+  }
+
+  void _removeImage(int id) {
+    setState(() {
+      _images.removeWhere((i) => i.id == id);
+      _imageProblem = null;
+    });
+  }
+
+  Future<void> _openAttachSheet() async {
+    final source = await showModalBottomSheet<ImagePickSource>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photo library'),
+              onTap: () => Navigator.of(sheetContext).pop(ImagePickSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Camera'),
+              onTap: () => Navigator.of(sheetContext).pop(ImagePickSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    final picks = await pickImagesForComposer(source);
+    await _addImageBytes(picks);
+  }
+
   // ------------------------------------------------------------- sending
 
   Future<void> _submit([PromptMode? modeOverride, String? overrideText]) async {
     final state = ref.read(sessionControllerProvider(widget.gwId));
     final message = (overrideText ?? _text.text).trim();
     final ended = state.info?.exited == true;
-    if (state.phase != SessionPhase.ready || ended || message.isEmpty) return;
+    if (state.phase != SessionPhase.ready || ended) return;
     if (_sending) return;
+    // Images-only sends are allowed; a slash command needs its text.
+    if (message.isEmpty && _images.isEmpty) return;
+    if (overrideText != null && message.isEmpty) return;
     final plan = sendPlan(state.running);
     final mode = modeOverride ?? plan.primary.mode;
     HapticFeedback.lightImpact();
     setState(() => _sending = true);
-    // TODO(E): image attachments go through the prompt `images` field.
+    final images = [for (final a in _images) toPromptImage(a.bytes)];
     final ok = await ref
         .read(sessionControllerProvider(widget.gwId).notifier)
-        .send(message, mode: mode);
+        .send(message, mode: mode, images: images.isEmpty ? null : images);
     if (!mounted) {
       // Unmounted mid-send (user backed out): the draft clear must not depend
       // on this widget being alive. A captured kv/key clears it even here.
@@ -134,8 +244,11 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     }
     setState(() => _sending = false);
     if (ok) {
-      // Clear only after the ack; a failure puts the words back.
+      // Clear only after the ack; a failure puts the words back (and the
+      // tray never left, so it is "restored" for free).
       _text.clear();
+      _images.clear();
+      _imageProblem = null;
       _dismissedFor = null;
       await _saveDraftNow();
     } else {
@@ -165,7 +278,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final ended =
         state.phase == SessionPhase.gone || state.info?.exited == true;
     final enabled = state.phase == SessionPhase.ready && !ended;
-    final canSend = enabled && !_sending && _text.text.trim().isNotEmpty;
+    final canSend = enabled &&
+        !_sending &&
+        (_text.text.trim().isNotEmpty || _images.isNotEmpty);
     final plan = sendPlan(streaming);
 
     final query = _dismissedFor == _text.text ? null : slashQuery(_text.text);
@@ -239,10 +354,44 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                   ],
                 ),
               ),
+            // Attached images: a 56dp thumbnail tray with per-thumb remove,
+            // and any validation problem inline under it (not a SnackBar).
+            if (_images.isNotEmpty) ...[
+              ImageTray(images: _images, onRemove: _removeImage),
+              if (_imageProblem != null)
+                Semantics(
+                  liveRegion: true,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
+                    child: Text(
+                      _imageProblem!,
+                      style: TextStyle(
+                        color: tokens.err,
+                        fontSize: OmpMetrics.fsSm,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
             Row(
               // The button stays by the last line as the field grows.
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                IconButton(
+                  onPressed: enabled && !_sending ? _openAttachSheet : null,
+                  tooltip: 'Attach images',
+                  icon: Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: 22,
+                    color: tokens.ink2,
+                  ),
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(OmpMetrics.hit, OmpMetrics.hit),
+                    padding: EdgeInsets.zero,
+                    tapTargetSize: MaterialTapTargetSize.padded,
+                    disabledForegroundColor: tokens.ink3,
+                  ),
+                ),
                 Expanded(
                   child: Container(
                     decoration: BoxDecoration(
@@ -267,6 +416,24 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                       maxLines: composerMaxLines,
                       textInputAction: TextInputAction.newline,
                       onChanged: _onChanged,
+                      // Gboard / keyboard image insertion (sticker and photo
+                      // keyboards): validated like a picked image.
+                      contentInsertionConfiguration:
+                          ContentInsertionConfiguration(
+                        allowedMimeTypes: const [
+                          'image/png',
+                          'image/jpeg',
+                          'image/webp',
+                          'image/gif',
+                        ],
+                        onContentInserted: (content) {
+                          final data = content.data;
+                          if (data == null) return;
+                          unawaited(
+                            _addImageBytes([(data, content.mimeType)]),
+                          );
+                        },
+                      ),
                       decoration: InputDecoration(
                         // The rounded container around the field draws the one outline
                         // (and the focus colour). The app theme gives every field its own

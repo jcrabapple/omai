@@ -753,6 +753,11 @@ class SessionController extends Notifier<SessionState> {
   /// Local send ids with a retry in flight (re-entry guard).
   final Set<String> _retrying = {};
 
+  /// The prompt images of each local send, kept until the gateway acks so a
+  /// failed images-only send can be retried (retrySend bails only when a
+  /// send had neither text nor images).
+  final Map<String, List<Map<String, String>>> _sendImages = {};
+
   /// Send a prompt. Optimistic: the LocalSendInput paints the bubble before
   /// the request goes out. Durable at the composer level: on failure the
   /// bubble turns into a failed one (Retry affordance) and the composer puts
@@ -769,6 +774,8 @@ class SessionController extends Notifier<SessionState> {
       // Retry: the SAME failed bubble flips back to pending; no second one.
       _dispatch(LocalSendRetryInput(localId));
     } else {
+      // Keep the images for a possible retry; cleared once the gateway acks.
+      if (images != null && images.isNotEmpty) _sendImages[localId] = images;
       _dispatch(
         LocalSendInput(
           localId: localId,
@@ -788,6 +795,7 @@ class SessionController extends Notifier<SessionState> {
       );
       if (!ref.mounted) return true; // sent; nothing left to paint
       _setInfo(info);
+      _sendImages.remove(localId);
       if (mode != 'prompt') {
         unawaited(_refreshQueued(env, gwId, _generation));
       }
@@ -820,13 +828,19 @@ class SessionController extends Notifier<SessionState> {
       }
     }
     final text = failed?.text.trim() ?? '';
-    if (text.isEmpty) return false;
+    final images = _sendImages[localId];
+    // An images-only failed send (empty text, images attached) retries too.
+    if (text.isEmpty && (images == null || images.isEmpty)) return false;
     _retrying.add(localId);
     if (ref.mounted) {
       state = state.copyWith(retryingSends: {...state.retryingSends, localId});
     }
     try {
-      return await send(text, retryLocalId: localId);
+      return await send(
+        text,
+        images: (images == null || images.isEmpty) ? null : images,
+        retryLocalId: localId,
+      );
     } finally {
       _retrying.remove(localId);
       if (ref.mounted) {
