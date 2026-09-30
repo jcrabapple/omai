@@ -165,11 +165,12 @@ Future<void> _pumpReady(
   required Size size,
   required double keyboard,
   required double textScale,
+  double topInset = 0,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   tester.view.viewInsets = FakeViewPadding(bottom: keyboard);
-  tester.view.padding = FakeViewPadding(bottom: 0);
+  tester.view.padding = FakeViewPadding(bottom: 0, top: topInset);
   tester.platformDispatcher.textScaleFactorTestValue = textScale;
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearAllTestValues);
@@ -279,4 +280,120 @@ void main() {
       );
     }
   }
+
+  // Device review L1: the fixed 120dp composer estimate and the 96dp menu
+  // floor overflow in landscape, split-screen, and with a multi-line input.
+  // The menu budget must come from the composer's measured height, and the
+  // menu must simply not render when there is no room for it.
+  testWidgets(
+    'landscape 640x360 with a 200dp keyboard: @ menu never overflows',
+    (tester) async {
+      final container = _container(gateway: Gateway(), hub: SocketHub());
+      addTearDown(container.dispose);
+      await _pumpReady(
+        tester,
+        container,
+        size: const Size(640, 360),
+        keyboard: 200,
+        textScale: 1.0,
+        topInset: 24,
+      );
+
+      await tester.enterText(find.byType(TextField).first, 'see @');
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpAndSettle();
+
+      // There is no room for a usable menu in this geometry: it must not
+      // render at all (rather than force 96dp and overflow the Column). If it
+      // does render, it must fit.
+      if (find.byType(AtMenu).evaluate().isNotEmpty) {
+        expect(
+          tester.getRect(find.byType(AtMenu)).height,
+          lessThanOrEqualTo(200),
+        );
+      }
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'no RenderFlex overflow in landscape',
+      );
+      expect(
+        tester.getRect(find.byType(TextField).first).bottom,
+        lessThanOrEqualTo(360),
+        reason: 'the input stays visible',
+      );
+    },
+  );
+
+  testWidgets('portrait 360x640, 330dp keyboard, 4 lines typed then @ fits', (
+    tester,
+  ) async {
+    final container = _container(gateway: Gateway(), hub: SocketHub());
+    addTearDown(container.dispose);
+    await _pumpReady(
+      tester,
+      container,
+      size: const Size(360, 640),
+      keyboard: 330,
+      textScale: 1.0,
+    );
+
+    await tester.enterText(
+      find.byType(TextField).first,
+      'line one\nline two\nline three\nsee @',
+    );
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AtMenu), findsOneWidget);
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: 'no RenderFlex overflow with a multi-line input',
+    );
+    expect(
+      tester.getRect(find.byType(TextField).first).bottom,
+      lessThanOrEqualTo(640),
+      reason: 'the input stays visible',
+    );
+  });
+
+  testWidgets(
+    'landscape 640x360 with a 200dp keyboard: slash menu never overflows',
+    (tester) async {
+      final container = _container(gateway: Gateway(), hub: SocketHub());
+      addTearDown(container.dispose);
+      await _pumpReady(
+        tester,
+        container,
+        size: const Size(640, 360),
+        keyboard: 200,
+        textScale: 1.0,
+        topInset: 24,
+      );
+      // A slash token cannot contain whitespace, so the multi-line stress
+      // is the @ case above; here the same tight geometry runs the slash
+      // menu instead.
+      await tester.enterText(find.byType(TextField).first, '/c');
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pumpAndSettle();
+
+      if (find.byType(SlashMenu).evaluate().isNotEmpty) {
+        expect(
+          tester.getRect(find.byType(SlashMenu)).height,
+          lessThanOrEqualTo(200),
+        );
+      }
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'no RenderFlex overflow in landscape with the keyboard up',
+      );
+      expect(
+        tester.getRect(find.byType(TextField).first).bottom,
+        lessThanOrEqualTo(360),
+        reason: 'the input stays visible',
+      );
+    },
+  );
 }

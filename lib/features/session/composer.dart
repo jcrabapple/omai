@@ -26,6 +26,7 @@ import '../../theme/tokens.dart';
 import '../../transcript/reducer.dart' show lastTurnFailure;
 import '../../transcript/send.dart' show sendPlan, PromptMode;
 import 'at_menu.dart';
+import 'session_header.dart';
 import 'image_tray.dart';
 import 'slash_menu.dart';
 
@@ -130,6 +131,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   // The failed send the composer is holding restored content for: when its
   // Retry acks and the content is unchanged, it is cleared (triage #12).
   _FailedSendSnapshot? _failedSend;
+
+  // Measures the composer's input/tray area (everything but the menus) so
+  // the menu budget comes from the real layout, not a constant (review L1).
+  final GlobalKey _composerKey = GlobalKey();
 
   // Captured in initState so dispose can flush without touching ref.
   DraftKv? _kv;
@@ -591,25 +596,250 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     final screen = view.physicalSize.height / dpr;
     final keyboard = view.viewInsets.bottom / dpr;
     final topInset = view.padding.top / dpr;
-    final menuMax = (screen - keyboard - topInset - kToolbarHeight - 120).clamp(
-      96.0,
-      320.0,
+    // The composer's own height (field rows, tray, paddings) is MEASURED
+    // from the last layout, not a constant: a multi-line input or an image
+    // tray shrinks the menu budget the same way (device review L1). When
+    // there is no room for a usable menu (two rows), the menu simply does
+    // not render - the @ / slash state stays, and the menu reappears when
+    // space returns.
+    final box = _composerKey.currentContext?.findRenderObject() as RenderBox?;
+    // Conservative one-line estimate until the first layout has run.
+    final composerHeight = (box != null && box.hasSize)
+        ? box.size.height
+        : 120.0;
+    // The header is taller than a bare app bar, and grows an activity row
+    // while a turn runs; both sit above the composer. Also budgeted: the
+    // composer's outer vertical paddings (top s2, bottom s3), the menu's
+    // own bottom margin (s2), and a small safety margin.
+    final chrome =
+        topInset +
+        SessionHeader.barHeight +
+        (state.activity != null ? SessionHeader.activityRow : 0.0);
+    final available =
+        screen -
+        keyboard -
+        chrome -
+        composerHeight -
+        OmpMetrics.s2 -
+        OmpMetrics.s3 -
+        OmpMetrics.s2 -
+        8;
+    final menuMax = available < 48
+        ? 0.0
+        : available.clamp(48.0, 320.0).toDouble();
+    final showMenus = menuMax >= 48;
+
+    final inputArea = Column(
+      key: _composerKey,
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // While a turn runs, Stop and Queue sit in a slim strip above the
+        // field, so the right of the field only ever holds one compact
+        // button (Send, or Steer while running).
+        if (streaming)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
+            child: Row(
+              children: [
+                if (state.queued > 0)
+                  Text(
+                    '${state.queued} queued',
+                    style: TextStyle(
+                      color: tokens.ink3,
+                      fontSize: OmpMetrics.fsSm,
+                    ),
+                  ),
+                const Spacer(),
+                if (plan.secondary != null)
+                  _stripAction(
+                    tokens,
+                    plan.secondary!.label,
+                    Icons.low_priority,
+                    onTap: canSend ? () => _submit(plan.secondary!.mode) : null,
+                  ),
+                _stripAction(
+                  tokens,
+                  'Stop',
+                  Icons.stop,
+                  color: tokens.err,
+                  onTap: enabled ? _stop : null,
+                ),
+              ],
+            ),
+          ),
+        // Backend turn failure: a slim Retry chip above the field (web
+        // Composer's canRetry chip).
+        if (canRetry)
+          Padding(
+            padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _retryTurn,
+                icon: _retryingTurn
+                    ? SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: tokens.accent,
+                        ),
+                      )
+                    : Icon(Icons.refresh, size: 16, color: tokens.accent),
+                label: Text(
+                  _retryingTurn ? 'Retrying' : 'Retry turn',
+                  style: TextStyle(
+                    color: tokens.accent,
+                    fontSize: OmpMetrics.fsSm,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // Attached images: a 56dp thumbnail tray with per-thumb remove,
+        // and any validation problem inline under it (not a SnackBar).
+        if (_images.isNotEmpty) ...[
+          ImageTray(images: _images, onRemove: _removeImage),
+          if (_imageProblem != null)
+            Semantics(
+              liveRegion: true,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
+                child: Text(
+                  _imageProblem!,
+                  style: TextStyle(
+                    color: tokens.err,
+                    fontSize: OmpMetrics.fsSm,
+                  ),
+                ),
+              ),
+            ),
+        ],
+        Row(
+          // The button stays by the last line as the field grows.
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            IconButton(
+              onPressed: enabled && !_sending ? _openAttachSheet : null,
+              tooltip: 'Attach images',
+              icon: Icon(
+                Icons.add_photo_alternate_outlined,
+                size: 22,
+                color: tokens.ink2,
+              ),
+              style: IconButton.styleFrom(
+                minimumSize: const Size(OmpMetrics.hit, OmpMetrics.hit),
+                padding: EdgeInsets.zero,
+                tapTargetSize: MaterialTapTargetSize.padded,
+                disabledForegroundColor: tokens.ink3,
+              ),
+            ),
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: tokens.field,
+                  borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
+                  border: Border.all(
+                    color: _focus.hasFocus ? tokens.accent : tokens.lineStrong,
+                  ),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: OmpMetrics.s3,
+                  vertical: OmpMetrics.s1,
+                ),
+                child: TextField(
+                  controller: _text,
+                  focusNode: _focus,
+                  enabled: enabled && !_sending,
+                  // Grows to five lines, then scrolls inside the field.
+                  minLines: 1,
+                  maxLines: composerMaxLines,
+                  textInputAction: TextInputAction.newline,
+                  onChanged: _onChanged,
+                  // Gboard / keyboard image insertion (sticker and photo
+                  // keyboards): validated like a picked image.
+                  contentInsertionConfiguration: ContentInsertionConfiguration(
+                    allowedMimeTypes: const [
+                      'image/png',
+                      'image/jpeg',
+                      'image/webp',
+                      'image/gif',
+                    ],
+                    onContentInserted: (content) {
+                      final data = content.data;
+                      if (data == null) return;
+                      unawaited(_addImageBytes([(data, content.mimeType)]));
+                    },
+                  ),
+                  decoration: InputDecoration(
+                    // The rounded container around the field draws the one outline
+                    // (and the focus colour). The app theme gives every field its own
+                    // enabled/focused outline and fill, and `border: none` alone doesn't
+                    // override those, which drew a second box inside the first.
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    focusedErrorBorder: InputBorder.none,
+                    filled: false,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: OmpMetrics.s2 + 2,
+                    ),
+                    hintText: !enabled
+                        ? 'This session has ended'
+                        : streaming
+                        ? 'Steer, or queue for after this turn'
+                        : 'Message omp',
+                    hintMaxLines: 1,
+                    hintStyle: TextStyle(
+                      color: tokens.ink3,
+                      fontSize: OmpMetrics.fsBase,
+                    ),
+                  ),
+                  style: TextStyle(
+                    color: tokens.ink,
+                    fontSize: 16, // below the 48px iOS zoom threshold
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: OmpMetrics.s1),
+            _sendButton(
+              tokens,
+              label: plan.primary.label,
+              icon: streaming ? Icons.send : Icons.arrow_upward,
+              onTap: canSend ? () => _submit() : null,
+            ),
+          ],
+        ),
+      ],
     );
 
+    // In extremely short windows (landscape with the keyboard up, split
+    // screen) the outer paddings alone would overflow the body Column:
+    // collapse them when the space cannot afford them, so the field itself
+    // always stays on screen (device review L1).
+    final tight =
+        (screen - keyboard - chrome) <
+        composerHeight + OmpMetrics.s2 + OmpMetrics.s3;
     return SafeArea(
       top: false,
       child: Padding(
         padding: EdgeInsets.only(
           left: OmpMetrics.s3,
           right: OmpMetrics.s3,
-          top: OmpMetrics.s2,
-          bottom: OmpMetrics.s3,
+          top: tight ? 0 : OmpMetrics.s2,
+          bottom: tight ? 0 : OmpMetrics.s3,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (atShow)
+            if (atShow && showMenus)
               Padding(
                 padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
                 child: AtMenu(
@@ -621,7 +851,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                   onHover: (i) => setState(() => _atSel = i),
                 ),
               ),
-            if (menuOpen)
+            if (menuOpen && showMenus)
               Padding(
                 padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
                 child: SlashMenu(
@@ -632,195 +862,7 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
                   onHover: (i) => setState(() => _sel = i),
                 ),
               ),
-            // While a turn runs, Stop and Queue sit in a slim strip above the
-            // field, so the right of the field only ever holds one compact
-            // button (Send, or Steer while running).
-            if (streaming)
-              Padding(
-                padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
-                child: Row(
-                  children: [
-                    if (state.queued > 0)
-                      Text(
-                        '${state.queued} queued',
-                        style: TextStyle(
-                          color: tokens.ink3,
-                          fontSize: OmpMetrics.fsSm,
-                        ),
-                      ),
-                    const Spacer(),
-                    if (plan.secondary != null)
-                      _stripAction(
-                        tokens,
-                        plan.secondary!.label,
-                        Icons.low_priority,
-                        onTap: canSend
-                            ? () => _submit(plan.secondary!.mode)
-                            : null,
-                      ),
-                    _stripAction(
-                      tokens,
-                      'Stop',
-                      Icons.stop,
-                      color: tokens.err,
-                      onTap: enabled ? _stop : null,
-                    ),
-                  ],
-                ),
-              ),
-            // Backend turn failure: a slim Retry chip above the field (web
-            // Composer's canRetry chip).
-            if (canRetry)
-              Padding(
-                padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: _retryTurn,
-                    icon: _retryingTurn
-                        ? SizedBox(
-                            width: 12,
-                            height: 12,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 1.5,
-                              color: tokens.accent,
-                            ),
-                          )
-                        : Icon(Icons.refresh, size: 16, color: tokens.accent),
-                    label: Text(
-                      _retryingTurn ? 'Retrying' : 'Retry turn',
-                      style: TextStyle(
-                        color: tokens.accent,
-                        fontSize: OmpMetrics.fsSm,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            // Attached images: a 56dp thumbnail tray with per-thumb remove,
-            // and any validation problem inline under it (not a SnackBar).
-            if (_images.isNotEmpty) ...[
-              ImageTray(images: _images, onRemove: _removeImage),
-              if (_imageProblem != null)
-                Semantics(
-                  liveRegion: true,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: OmpMetrics.s1),
-                    child: Text(
-                      _imageProblem!,
-                      style: TextStyle(
-                        color: tokens.err,
-                        fontSize: OmpMetrics.fsSm,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-            Row(
-              // The button stays by the last line as the field grows.
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                IconButton(
-                  onPressed: enabled && !_sending ? _openAttachSheet : null,
-                  tooltip: 'Attach images',
-                  icon: Icon(
-                    Icons.add_photo_alternate_outlined,
-                    size: 22,
-                    color: tokens.ink2,
-                  ),
-                  style: IconButton.styleFrom(
-                    minimumSize: const Size(OmpMetrics.hit, OmpMetrics.hit),
-                    padding: EdgeInsets.zero,
-                    tapTargetSize: MaterialTapTargetSize.padded,
-                    disabledForegroundColor: tokens.ink3,
-                  ),
-                ),
-                Expanded(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: tokens.field,
-                      borderRadius: BorderRadius.circular(OmpMetrics.radiusLg),
-                      border: Border.all(
-                        color: _focus.hasFocus
-                            ? tokens.accent
-                            : tokens.lineStrong,
-                      ),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: OmpMetrics.s3,
-                      vertical: OmpMetrics.s1,
-                    ),
-                    child: TextField(
-                      controller: _text,
-                      focusNode: _focus,
-                      enabled: enabled && !_sending,
-                      // Grows to five lines, then scrolls inside the field.
-                      minLines: 1,
-                      maxLines: composerMaxLines,
-                      textInputAction: TextInputAction.newline,
-                      onChanged: _onChanged,
-                      // Gboard / keyboard image insertion (sticker and photo
-                      // keyboards): validated like a picked image.
-                      contentInsertionConfiguration:
-                          ContentInsertionConfiguration(
-                            allowedMimeTypes: const [
-                              'image/png',
-                              'image/jpeg',
-                              'image/webp',
-                              'image/gif',
-                            ],
-                            onContentInserted: (content) {
-                              final data = content.data;
-                              if (data == null) return;
-                              unawaited(
-                                _addImageBytes([(data, content.mimeType)]),
-                              );
-                            },
-                          ),
-                      decoration: InputDecoration(
-                        // The rounded container around the field draws the one outline
-                        // (and the focus colour). The app theme gives every field its own
-                        // enabled/focused outline and fill, and `border: none` alone doesn't
-                        // override those, which drew a second box inside the first.
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        disabledBorder: InputBorder.none,
-                        errorBorder: InputBorder.none,
-                        focusedErrorBorder: InputBorder.none,
-                        filled: false,
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: OmpMetrics.s2 + 2,
-                        ),
-                        hintText: !enabled
-                            ? 'This session has ended'
-                            : streaming
-                            ? 'Steer, or queue for after this turn'
-                            : 'Message omp',
-                        hintMaxLines: 1,
-                        hintStyle: TextStyle(
-                          color: tokens.ink3,
-                          fontSize: OmpMetrics.fsBase,
-                        ),
-                      ),
-                      style: TextStyle(
-                        color: tokens.ink,
-                        fontSize: 16, // below the 48px iOS zoom threshold
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: OmpMetrics.s1),
-                _sendButton(
-                  tokens,
-                  label: plan.primary.label,
-                  icon: streaming ? Icons.send : Icons.arrow_upward,
-                  onTap: canSend ? () => _submit() : null,
-                ),
-              ],
-            ),
+            inputArea,
           ],
         ),
       ),

@@ -82,6 +82,113 @@ void main() {
     expect(s.items.whereType<FileMentionItem>().length, 1);
   });
 
+  test('message_start then message_end collapse into one item with the final files', () {
+    // omp stamps fileMention messages with a timestamp and re-emits the full
+    // message as it settles: the later frame (with the full file list) must
+    // win over the earlier, emptier one.
+    final start = EventInput(
+      OmpEvent({
+        'type': 'message_start',
+        'messageId': 'm1',
+        'message': mention(timestamp: 5, files: []),
+      }),
+    );
+    final end = EventInput(
+      OmpEvent({
+        'type': 'message_end',
+        'messageId': 'm1',
+        'message': mention(
+          timestamp: 5,
+          files: [
+            file(),
+            file(path: 'other.dart'),
+          ],
+        ),
+      }),
+    );
+    var s = reduce(emptyTranscript(), start);
+    s = reduce(s, end);
+    final items = s.items.whereType<FileMentionItem>().toList();
+    expect(items.length, 1);
+    expect(items.single.files.length, 2);
+    expect(items.single.files[1].path, 'other.dart');
+  });
+
+  test('history then live replay of the same stamped message dedupes', () {
+    // A stamped message loaded from history, then replayed live with an id:
+    // both must resolve to the same key, or the transcript shows the row
+    // twice.
+    final m = mention(timestamp: 5, files: [file()]);
+    var s = reduce(
+      emptyTranscript(),
+      HistoryInput([
+        {'role': 'user', 'timestamp': 1, 'content': 'hi'},
+        {...m, 'id': 'm1'},
+      ]),
+    );
+    s = reduce(
+      s,
+      EventInput(
+        OmpEvent({
+          'type': 'message_end',
+          'messageId': 'm1',
+          'message': {...m, 'id': 'm1'},
+        }),
+      ),
+    );
+    expect(s.items.whereType<FileMentionItem>().length, 1);
+  });
+
+  test('an untimed, id-stamped message dedupes across history and live', () {
+    // No timestamp: the key must fall back to the message id on both paths.
+    Map<String, Object?> m() => {
+      ...mention(files: [file()]),
+      'id': 'm1',
+    };
+    var s = reduce(
+      emptyTranscript(),
+      HistoryInput([
+        {'role': 'user', 'timestamp': 1, 'content': 'hi'},
+        m(),
+      ]),
+    );
+    s = reduce(
+      s,
+      EventInput(
+        OmpEvent({'type': 'message_end', 'messageId': 'm1', 'message': m()}),
+      ),
+    );
+    expect(s.items.whereType<FileMentionItem>().length, 1);
+  });
+
+  test('a live fileMention lands before trailing local user items', () {
+    // omp appends the mention right after the user message it belongs to;
+    // prompts the user queued locally in the meantime sit at the end and must
+    // not swallow the row.
+    var s = reduce(
+      emptyTranscript(),
+      HistoryInput([
+        {'role': 'user', 'timestamp': 1, 'content': 'first'},
+      ]),
+    );
+    s = reduce(
+      s,
+      LocalSendInput(localId: 'q1', text: 'queued prompt', mode: 'follow_up'),
+    );
+    s = reduce(
+      s,
+      EventInput(
+        OmpEvent({
+          'type': 'message_end',
+          'messageId': 'm1',
+          'message': mention(timestamp: 2, files: [file()]),
+        }),
+      ),
+    );
+    final kinds = s.items.map((i) => i.kind).toList();
+    expect(kinds, ['user', 'fileMention', 'user']);
+  });
+
   test('malformed payloads do not crash', () {
     final s = reduce(
       emptyTranscript(),
@@ -97,7 +204,9 @@ void main() {
         {'role': 'fileMention'},
       ]),
     );
-    // Every message still yields at most one item, with zero or more files.
+    // Every message yields exactly one item: the count guard keeps this from
+    // passing vacuously if reduce ever silently drops malformed messages.
+    expect(s.items.whereType<FileMentionItem>().length, 3);
     for (final item in s.items.whereType<FileMentionItem>()) {
       expect(item.files.length, lessThanOrEqualTo(3));
       for (final f in item.files) {

@@ -4,6 +4,7 @@
 // monospace scrollable view, rendered lazily so a 5k-line file cannot jank.
 // File content never enters a semantics label or a log.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../theme/tokens.dart';
 import '../../transcript/items.dart';
@@ -11,6 +12,36 @@ import '../../transcript/items.dart';
 /// How many characters of a file render before the user asks for the rest.
 @visibleForTesting
 const int contentPreviewChars = 20000;
+
+/// Hard cap for 'Show all': beyond this the sheet shows the head and says so,
+/// because laying out megabytes of text in one frame locks the UI thread.
+@visibleForTesting
+const int contentShowAllChars = 200000;
+
+/// Size of the lazily built text chunks in the full view.
+@visibleForTesting
+const int contentChunkChars = 2000;
+
+/// Split [text] into chunks of about [chunkChars], breaking on newlines when
+/// one is nearby so a chunk boundary rarely cuts a line in half.
+List<String> chunkContent(String text, int chunkChars) {
+  if (text.isEmpty) return const [''];
+  final chunks = <String>[];
+  var start = 0;
+  while (start < text.length) {
+    if (text.length - start <= chunkChars) {
+      chunks.add(text.substring(start));
+      break;
+    }
+    var end = start + chunkChars;
+    // Prefer a newline within the last quarter of the window.
+    final nl = text.lastIndexOf('\n', end);
+    if (nl > start + chunkChars - chunkChars ~/ 4) end = nl + 1;
+    chunks.add(text.substring(start, end));
+    start = end;
+  }
+  return chunks;
+}
 
 /// More files than this collapse into one summary row.
 @visibleForTesting
@@ -71,6 +102,12 @@ class FileMentionRow extends StatelessWidget {
           ];
 
     return Semantics(
+      // container: true keeps 'Attached files' as a group boundary while the
+      // file rows inside stay their own focusable nodes with their own tap
+      // action (device review L7b): without it the whole column collapses
+      // into one merged stop when skipped or image files are present.
+      container: true,
+      explicitChildNodes: true,
       label: 'Attached files',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,16 +178,24 @@ class _ContentSheet extends StatefulWidget {
 
 class _ContentSheetState extends State<_ContentSheet> {
   bool _all = false;
+  bool _copied = false;
 
   @override
   Widget build(BuildContext context) {
     final f = widget.file;
     final t = widget.tokens;
     final content = f.content ?? '';
-    final truncated = !_all && content.length > contentPreviewChars;
-    final shown = truncated
-        ? content.substring(0, contentPreviewChars)
-        : content;
+    final previewTruncated = !_all && content.length > contentPreviewChars;
+    // 'Show all' is itself capped: a multi-megabyte file shows its head with
+    // a note, and 'Copy all' carries the full content to the clipboard.
+    final shownLength = _all
+        ? content.length.clamp(0, contentShowAllChars)
+        : content.length.clamp(0, contentPreviewChars);
+    final shown = content.substring(0, shownLength);
+    final capped = _all && content.length > contentShowAllChars;
+    // Lazily built chunks: a virtualized list so even the capped view never
+    // lays out more than the visible few chunks per frame (device review L4).
+    final chunks = chunkContent(shown, contentChunkChars);
 
     return SafeArea(
       child: ConstrainedBox(
@@ -189,10 +234,11 @@ class _ContentSheetState extends State<_ContentSheet> {
             ),
             const Divider(height: 1),
             Flexible(
-              child: SingleChildScrollView(
+              child: ListView.builder(
                 padding: const EdgeInsets.all(OmpMetrics.s3),
-                child: SelectableText(
-                  shown,
+                itemCount: chunks.length,
+                itemBuilder: (context, i) => Text(
+                  chunks[i],
                   style: TextStyle(
                     color: t.ink,
                     fontSize: OmpMetrics.fsSm,
@@ -201,7 +247,7 @@ class _ContentSheetState extends State<_ContentSheet> {
                 ),
               ),
             ),
-            if (truncated)
+            if (previewTruncated)
               Padding(
                 padding: const EdgeInsets.all(OmpMetrics.s2),
                 child: Center(
@@ -210,7 +256,42 @@ class _ContentSheetState extends State<_ContentSheet> {
                     child: const Text('Show all'),
                   ),
                 ),
+              )
+            else ...[
+              if (capped)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: OmpMetrics.s3),
+                  child: Text('Showing the first 200k characters.'),
+                ),
+              Padding(
+                padding: const EdgeInsets.all(OmpMetrics.s2),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: content.isEmpty
+                          ? null
+                          : () {
+                              Clipboard.setData(ClipboardData(text: content));
+                              setState(() => _copied = true);
+                            },
+                      icon: const Icon(Icons.copy, size: 16),
+                      label: const Text('Copy all'),
+                    ),
+                    if (_copied) ...[
+                      const SizedBox(width: OmpMetrics.s2),
+                      Text(
+                        'Copied',
+                        style: TextStyle(
+                          color: t.ink3,
+                          fontSize: OmpMetrics.fsSm,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
+            ],
           ],
         ),
       ),

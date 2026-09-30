@@ -319,7 +319,11 @@ String resultText(Object? r) {
 String _keyOf(Map<String, Object?> m, String? messageId, String fallback) {
   final ts = m['timestamp'];
   if (ts is num) return '${m['role']}:${ts.toInt()}';
-  return '${m['role']}:${messageId != null && messageId.isNotEmpty ? 'id:$messageId' : fallback}';
+  // Fall back to the message's own id (history carries it, and an untimed
+  // message must key the same from history as from a live replay).
+  final own = m['id'];
+  final id = messageId ?? (own is String && own.isNotEmpty ? own : null);
+  return '${m['role']}:${id != null && id.isNotEmpty ? 'id:$id' : fallback}';
 }
 
 const List<String> _summaryKeys = [
@@ -440,11 +444,35 @@ void _applyFileMention(
   required String fallback,
 }) {
   final key = _keyOf(m, messageId, fallback);
-  if (_findKeyed(d, 'fileMention', key) >= 0) return;
   final files = FileMentionFile.listFrom(m['files']);
-  d.items.add(
-    FileMentionItem(id: 'fm:$key', files: files, messageKey: key, raw: m),
+  final item = FileMentionItem(
+    id: 'fm:$key',
+    files: files,
+    messageKey: key,
+    raw: m,
   );
+  final i = _findKeyed(d, 'fileMention', key);
+  if (i >= 0) {
+    // A later frame with the same key (message_end after message_start, a
+    // live replay of history) REPLACES the earlier, emptier one.
+    d.items[i] = item;
+    return;
+  }
+  // omp appends the mention right after the user message it belongs to and
+  // before the assistant runs. The one real edge: local user items the user
+  // sent in the meantime (pending, queued, steer-pending, not yet confirmed
+  // by omp) sit at the end - the row lands before that trailing run, never
+  // searching backwards past assistant or tool items (device review L3).
+  var insertAt = d.items.length;
+  for (var j = d.items.length - 1; j >= 0; j--) {
+    final it = d.items[j];
+    final localOnly =
+        it is UserItem &&
+        (it.pending || it.note == 'queued' || it.note == 'steer-pending');
+    if (!localOnly) break;
+    insertAt = j;
+  }
+  d.items.insert(insertAt, item);
 }
 
 void _applyUser(

@@ -53,8 +53,9 @@ class _MessageActionsState extends State<MessageActions> {
   Future<void> openMenu(BuildContext context, {Offset? at}) async {
     if (widget.disabled) return;
     // Review #16: no overlay (a sheet transition, teardown) means no menu.
+    // Overlay.maybeOf: Overlay.of throws when there is no ancestor overlay.
     final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
+        Overlay.maybeOf(context)?.context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
     // Anchor for callers without a position (the overflow button passes its
     // own): the top left of this widget, in global coordinates.
@@ -136,7 +137,14 @@ class _MessageActionsState extends State<MessageActions> {
 
   @override
   Widget build(BuildContext context) {
+    // One semantics node per message: the outer Semantics carries the label
+    // and the long-press action; container merges the message text into the
+    // same stop, so TalkBack reads 'label, text, long-press for message
+    // actions' once, then reaches the overflow button. The GestureDetector
+    // is excluded from semantics: its own long-press handler would otherwise
+    // create a second long-press node (device review L7a).
     return Semantics(
+      container: true,
       label: widget.label,
       onLongPressHint: 'Message actions',
       onLongPress: widget.disabled ? null : () => openMenu(context),
@@ -146,15 +154,17 @@ class _MessageActionsState extends State<MessageActions> {
         // content (the overflow button aligns itself to the right).
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Long-press anywhere on the bubble opens the menu (with haptics);
-          // opaque so the padding of an empty or short bubble counts too.
+          // Long-press anywhere on the bubble opens the menu (with haptics),
+          // anchored at the finger (device review L5); opaque so the padding
+          // of an empty or short bubble counts too.
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onLongPress: widget.disabled
+            excludeFromSemantics: true,
+            onLongPressStart: widget.disabled
                 ? null
-                : () {
+                : (details) {
                     HapticFeedback.mediumImpact();
-                    openMenu(context);
+                    openMenu(context, at: details.globalPosition);
                   },
             child: widget.child,
           ),
@@ -162,21 +172,28 @@ class _MessageActionsState extends State<MessageActions> {
           if (!widget.disabled)
             Align(
               alignment: Alignment.centerRight,
-              child: IconButton(
-                tooltip: 'Message actions',
-                // Not a token: MessageActions also renders in plain
-                // contexts (tests, sheets) whose theme has no OmpTokens.
-                icon: Icon(
-                  Icons.more_vert,
-                  size: 20,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+              child: Builder(
+                builder: (btnContext) => IconButton(
+                  tooltip: 'Message actions',
+                  // Not a token: MessageActions also renders in plain
+                  // contexts (tests, sheets) whose theme has no OmpTokens.
+                  icon: Icon(
+                    Icons.more_vert,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: OmpItemStyle.hit,
+                    minHeight: OmpItemStyle.hit,
+                  ),
+                  // Anchors at the button's own render box (L5), not the
+                  // top-left of the whole message.
+                  onPressed: () {
+                    final box = btnContext.findRenderObject() as RenderBox?;
+                    openMenu(context, at: box?.localToGlobal(Offset.zero));
+                  },
                 ),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(
-                  minWidth: OmpItemStyle.hit,
-                  minHeight: OmpItemStyle.hit,
-                ),
-                onPressed: () => openMenu(context),
               ),
             ),
         ],

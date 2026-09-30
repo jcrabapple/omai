@@ -32,8 +32,14 @@ class SessionHeader extends ConsumerWidget implements PreferredSizeWidget {
   /// otherwise the AppBar's bottom overflows the allocated height.
   final bool hasActivity;
 
-  static const double _toolbar = kToolbarHeight + 26;
-  static const double _activityRow = 24;
+  /// The bar's own height, above the status bar inset.
+  static const double barHeight = kToolbarHeight + 26;
+
+  /// The activity line shown under the bar while a turn runs.
+  static const double activityRow = 24;
+
+  static const double _toolbar = barHeight;
+  static const double _activityRow = activityRow;
 
   @override
   Size get preferredSize =>
