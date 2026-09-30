@@ -98,8 +98,9 @@ class KeepaliveService : Service() {
         this,
         0,
         Intent(this, MainActivity::class.java)
+            .setAction(MainActivity.ACTION_OPEN_SESSION)
             .putExtra(MainActivity.EXTRA_GW_ID, gwId)
-            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
@@ -127,20 +128,18 @@ class KeepaliveService : Service() {
     /**
      * Android 15+: the dataSync budget (6h per 24h) ran out. Stop within the
      * grace period and tell Dart, which pauses the controller like any other
-     * background.
+     * background. Only the 2-arg overload exists to override here (API 35+);
+     * on API 34 the system never calls a service timeout.
      */
     override fun onTimeout(startId: Int, fgsType: Int) {
-        endedBySystem()
-    }
-
-    @Deprecated("API 35 overload; kept for API 34 devices")
-    override fun onTimeout(startId: Int) {
         endedBySystem()
     }
 
     private fun endedBySystem() {
         val gwId = lastGwId
         stopSelf()
+        // A null channel means the engine is gone; the service teardown has
+        // already stopped everything, so there is nothing to tell (review #3).
         MainActivity.dartChannel?.invokeMethod(
             "intent",
             mapOf("type" to "keepaliveEnded", "gwId" to gwId),
@@ -148,6 +147,10 @@ class KeepaliveService : Service() {
     }
 
     override fun onDestroy() {
+        // Review #5: stopSelf alone leaves the ongoing notification behind
+        // on several OEM builds; remove it and cancel the id explicitly.
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID)
         instance = null
         super.onDestroy()
     }

@@ -64,15 +64,19 @@ void main() {
     expect(note.opacity, 0.7);
   });
 
-  testWidgets('long press opens copy and inspect actions', (tester) async {
-    await pumpOmp(tester, UserBubble(item: item()));
-    // Press on the bubble padding: the SelectionArea owns long-presses on
-    // the text itself.
-    final text = tester.getRect(find.text('hello'));
-    await tester.longPressAt(Offset(text.left - 6, text.center.dy));
+  testWidgets('long press selects and the selection toolbar offers the '
+      'actions; the overflow opens the menu', (tester) async {
+    await pumpOmp(
+      tester,
+      UserBubble(item: item(), onInspect: (_) {}),
+    );
+    // Review #6: the SelectionArea owns the long press (select + toolbar).
+    await tester.longPress(find.text('hello'));
     await tester.pumpAndSettle();
-    expect(find.text('Copy'), findsOneWidget);
-    expect(find.text('Inspect'), findsOneWidget);
+    expect(find.text('Copy'), findsOneWidget,
+        reason: 'the toolbar shows Copy for a non-empty selection');
+    expect(find.text('Inspect'), findsOneWidget,
+        reason: 'message actions ride in the selection toolbar');
   });
 
   testWidgets('the text is selectable', (tester) async {

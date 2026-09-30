@@ -5,7 +5,7 @@
 // share intents, launcher shortcuts, and notification taps, all over the
 // one MethodChannel (see lib/native/).
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -26,8 +26,9 @@ class DarkPresetNotifier extends Notifier<OmpPreset> {
   void set(OmpPreset p) => state = p;
 }
 
-final darkPresetProvider =
-    NotifierProvider<DarkPresetNotifier, OmpPreset>(DarkPresetNotifier.new);
+final darkPresetProvider = NotifierProvider<DarkPresetNotifier, OmpPreset>(
+  DarkPresetNotifier.new,
+);
 
 /// Custom accent override from settings; null keeps the preset accent.
 class AccentOverrideNotifier extends Notifier<Color?> {
@@ -36,8 +37,9 @@ class AccentOverrideNotifier extends Notifier<Color?> {
   void set(Color? c) => state = c;
 }
 
-final accentOverrideProvider =
-    NotifierProvider<AccentOverrideNotifier, Color?>(AccentOverrideNotifier.new);
+final accentOverrideProvider = NotifierProvider<AccentOverrideNotifier, Color?>(
+  AccentOverrideNotifier.new,
+);
 
 /// The sessions screen subscribes to this so polling runs only while it is
 /// the top route.
@@ -55,12 +57,24 @@ class OmpApp extends ConsumerStatefulWidget {
 class _OmpAppState extends ConsumerState<OmpApp> {
   static const _channel = MethodChannel('us.snakepit.ohmypi/native');
 
+  // Set when a navigation intent (share, shortcut, notification tap) lands
+  // before the connection notifier has settled: it is dispatched once the
+  // notifier is no longer busy, instead of being dropped because sign-in has
+  // not resolved yet. Share text held back while signed out is kept here and
+  // offered as a new-session prompt after sign-in.
+  Map<String, Object?>? _queuedLaunch;
+  String? _pendingSharePrompt;
+
   @override
   void initState() {
     super.initState();
     _channel.setMethodCallHandler(_onNativeCall);
     // Cold start: Android launched us with a share intent or a shortcut.
     _fetchInitialIntent();
+    // Dispatch the queued launch as soon as the connection settles.
+    ref.listenManual(connectionNotifierProvider, (prev, next) {
+      _flushQueuedLaunch(next);
+    });
   }
 
   @override
@@ -73,9 +87,18 @@ class _OmpAppState extends ConsumerState<OmpApp> {
     try {
       final initial = await _channel.invokeMethod('getInitialIntent');
       if (initial is Map) {
+        final args = Map<String, Object?>.from(initial);
         // Let the first frame land before pushing routes on top of it.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _handleIntent(Map<String, Object?>.from(initial));
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          _handleIntent(args);
+          // Dart has now taken ownership of the payload (dispatched or
+          // queued); only now may the native side forget it.
+          try {
+            await _channel.invokeMethod('launchHandled');
+          } on PlatformException {
+            // No native side (tests).
+          }
         });
       }
     } on PlatformException {
@@ -90,8 +113,9 @@ class _OmpAppState extends ConsumerState<OmpApp> {
   }
 
   /// Routes from the native side. Notification Stop / approval actions go to
-  /// the session's keepalive coordinator via [KeepaliveRegistry]; the rest
-  /// are navigation.
+  /// the session's keepalive coordinator via [KeepaliveRegistry] and must be
+  /// delivered immediately; the rest are navigation and wait for the
+  /// connection notifier to settle (see [_queuedLaunch]).
   void _handleIntent(Map<String, Object?> args) {
     final type = args['type'];
     final gwId = args['gwId'];
@@ -113,7 +137,43 @@ class _OmpAppState extends ConsumerState<OmpApp> {
           KeepaliveRegistry.forGwId(gwId)?.systemStopped();
         }
       case 'openSession':
-        if (gwId is String) _openSession(gwId);
+        if (gwId is String) _navigateOrQueue(args);
+      case 'newSession':
+        _navigateOrQueue(args);
+      case 'needsYou':
+        _navigateOrQueue(args);
+      default:
+        break;
+    }
+  }
+
+  /// Navigation needs the signed-in state, which is not known until the
+  /// connection notifier finishes loading; before that, queue the payload.
+  void _navigateOrQueue(Map<String, Object?> args) {
+    if (ref.read(connectionNotifierProvider).busy) {
+      _queuedLaunch = args;
+      return;
+    }
+    _dispatchNavigation(args);
+  }
+
+  /// The notifier settled: run or drop the queued launch. A share that
+  /// arrived before sign-in keeps its text as a pending prompt.
+  void _flushQueuedLaunch(ConnectionState conn) {
+    if (conn.busy) return;
+    final queued = _queuedLaunch;
+    _queuedLaunch = null;
+    if (queued != null) _dispatchNavigation(queued);
+    if (!conn.signedIn || _pendingSharePrompt == null) return;
+    final prompt = _pendingSharePrompt;
+    _pendingSharePrompt = null;
+    _newSession(prompt);
+  }
+
+  void _dispatchNavigation(Map<String, Object?> args) {
+    switch (args['type']) {
+      case 'openSession':
+        if (args['gwId'] is String) _openSession(args['gwId'] as String);
       case 'newSession':
         _newSession(args['prompt'] is String ? args['prompt'] as String : null);
       case 'needsYou':
@@ -132,16 +192,28 @@ class _OmpAppState extends ConsumerState<OmpApp> {
   }
 
   void _openSession(String gwId) {
-    if (!_signedIn) return;
+    if (!_signedIn) {
+      // Signed out (settled): the notification tap cannot be honoured. A
+      // share would still have usable text, handled in _dispatchNavigation's
+      // newSession branch below; here there is only a target session.
+      return;
+    }
     final nav = _rootNavigatorKey.currentState;
     if (nav == null) return;
     _popToRoot();
     nav.push(
-        MaterialPageRoute<void>(builder: (_) => SessionScreen(gwId: gwId)));
+      MaterialPageRoute<void>(builder: (_) => SessionScreen(gwId: gwId)),
+    );
   }
 
   Future<void> _newSession(String? prompt) async {
-    if (!_signedIn) return;
+    if (!_signedIn) {
+      // Signed out (settled): keep the text as a pending prompt shown after
+      // sign-in instead of losing it.
+      final text = (prompt ?? '').trim();
+      if (text.isNotEmpty) _pendingSharePrompt = text;
+      return;
+    }
     final nav = _rootNavigatorKey.currentState;
     final context = _rootNavigatorKey.currentContext;
     if (nav == null || context == null) return;
@@ -151,8 +223,11 @@ class _OmpAppState extends ConsumerState<OmpApp> {
       ref,
       initialPrompt: (prompt ?? '').trim().isEmpty ? null : prompt,
       onCreated: (info) {
-        nav.push(MaterialPageRoute<void>(
-            builder: (_) => SessionScreen(gwId: info.gwId)));
+        nav.push(
+          MaterialPageRoute<void>(
+            builder: (_) => SessionScreen(gwId: info.gwId),
+          ),
+        );
       },
     );
   }
@@ -170,7 +245,9 @@ class _OmpAppState extends ConsumerState<OmpApp> {
       darkTheme: OmpTheme.data(darkPreset, accent: accent),
       themeMode: ThemeMode.system,
       navigatorObservers: [ompRouteObserver],
-      home: connection.signedIn ? const SessionsScreen() : const ConnectScreen(),
+      home: connection.signedIn
+          ? const SessionsScreen()
+          : const ConnectScreen(),
     );
   }
 }

@@ -30,6 +30,9 @@ class MainActivity : FlutterActivity() {
         const val CHANNEL_NAME = "us.snakepit.ohmypi/native"
 
         const val ACTION_SHORTCUT = "us.snakepit.ohmypi.action.SHORTCUT"
+
+        /** App-private navigation action: notification taps only (review #9). */
+        const val ACTION_OPEN_SESSION = "us.snakepit.ohmypi.action.OPEN_SESSION"
         const val EXTRA_ROUTE = "route"
         const val EXTRA_GW_ID = "gwId"
         const val EXTRA_REQUEST_ID = "requestId"
@@ -37,11 +40,40 @@ class MainActivity : FlutterActivity() {
 
         const val PERMISSION_REQUEST_CODE = 4242
 
+        /** Notification tag so approval ids can never touch the running id. */
+        const val TAG_APPROVALS = "approval"
+
         @Volatile var dartChannel: MethodChannel? = null
         @Volatile private var permissionReply: ((Boolean) -> Unit)? = null
 
-        /** Cold-start intent, consumed once by the Dart side. */
+        /** Cold-start intent, held until Dart says it handled it (review #1). */
         @Volatile var pendingLaunchPayload: Map<String, Any?>? = null
+
+        /** Approval notification ids posted but not yet cancelled (review #3). */
+        private val openApprovalIds =
+            java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+        // Monotonic PendingIntent / notification request codes keyed by
+        // requestId (+action): hashCode collisions made Approve fire Deny and
+        // let an approval id collide with the running NOTIFICATION_ID
+        // (review #7).
+        private val requestCodes = HashMap<String, Int>()
+        private var nextRequestCode = 10_000
+
+        @Synchronized
+        fun requestCodeFor(key: String): Int =
+            requestCodes.getOrPut(key) { ++nextRequestCode }
+
+        fun notificationIdFor(requestId: String): Int =
+            requestCodeFor("notif:$requestId")
+
+        fun trackApproval(requestId: String) {
+            openApprovalIds.add(requestId)
+        }
+
+        fun forgetApproval(requestId: String) {
+            openApprovalIds.remove(requestId)
+        }
 
         fun createNotificationChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -67,6 +99,24 @@ class MainActivity : FlutterActivity() {
                 },
             )
         }
+
+        /**
+         * The FlutterActivity OWNS its engine: when it is destroyed the Dart
+         * isolate dies with it, so the keep-alive cannot outlive the engine
+         * and must not pretend to (review #3). Called with the engine gone:
+         * stop the service and cancel every ohmypi notification, so no dead
+         * Approve / Stop buttons stay in the drawer.
+         */
+        fun tearDownKeepalive(context: Context) {
+            dartChannel = null
+            context.stopService(Intent(context, KeepaliveService::class.java))
+            val nm = NotificationManagerCompat.from(context)
+            nm.cancel(KeepaliveService.NOTIFICATION_ID)
+            for (id in openApprovalIds.toList()) {
+                nm.cancel(TAG_APPROVALS, notificationIdFor(id))
+                openApprovalIds.remove(id)
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -88,9 +138,14 @@ class MainActivity : FlutterActivity() {
                 "showApproval" -> { showApproval(call.arguments as? Map<*, *>); result.success(null) }
                 "cancelApproval" -> { cancelApproval(call.arguments as? Map<*, *>); result.success(null) }
                 "getInitialIntent" -> {
-                    val payload = pendingLaunchPayload
+                    // Not consumed here: Dart acknowledges with
+                    // launchHandled after it has dispatched or queued the
+                    // payload (review #1).
+                    result.success(pendingLaunchPayload)
+                }
+                "launchHandled" -> {
                     pendingLaunchPayload = null
-                    result.success(payload)
+                    result.success(null)
                 }
                 else -> result.notImplemented()
             }
@@ -98,7 +153,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        dartChannel = null
+        // The engine (and the Dart isolate with it) is going away: the
+        // service has nothing left to keep alive and the notification
+        // buttons would be dead (review #3).
+        tearDownKeepalive(this)
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -108,6 +166,11 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         createNotificationChannels(this)
         intentToPayload(intent)?.let { pendingLaunchPayload = it }
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) tearDownKeepalive(this)
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -120,9 +183,17 @@ class MainActivity : FlutterActivity() {
     /** Maps a launch intent to the Dart routing payload; null when not ours. */
     private fun intentToPayload(intent: Intent?): Map<String, Any?>? {
         if (intent == null) return null
-        val gwId = intent.getStringExtra(EXTRA_GW_ID)
-        if (gwId != null) {
-            // Notification tap: open the app on that session.
+        // Restored from the Recents screen: the original launch intent comes
+        // back again, and re-running an old share or shortcut would be
+        // wrong (review #15).
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) {
+            return null
+        }
+        if (intent.action == ACTION_OPEN_SESSION) {
+            // Notification tap: open the app on that session. The action is
+            // app-private so third-party apps cannot spoof navigation with
+            // a bare EXTRA_GW_ID (review #9).
+            val gwId = intent.getStringExtra(EXTRA_GW_ID) ?: return null
             return mapOf("type" to "openSession", "gwId" to gwId)
         }
         val shared = intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -213,7 +284,10 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun stopKeepalive() {
-        KeepaliveService.instance?.stopSelf()
+        // stopService also cancels a start that is still in flight, where
+        // KeepaliveService.instance is not set yet; stopSelf alone would
+        // leak the freshly started service (review #5).
+        stopService(Intent(this, KeepaliveService::class.java))
     }
 
     private fun showApproval(args: Map<*, *>?) {
@@ -232,10 +306,11 @@ class MainActivity : FlutterActivity() {
 
         val open = PendingIntent.getActivity(
             this,
-            requestId.hashCode(),
+            requestCodeFor("$requestId:open"),
             Intent(this, MainActivity::class.java)
+                .setAction(ACTION_OPEN_SESSION)
                 .putExtra(EXTRA_GW_ID, gwId)
-                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -251,7 +326,7 @@ class MainActivity : FlutterActivity() {
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
 
-        for ((index, raw) in actions.withIndex()) {
+        for (raw in actions) {
             val map = raw as? Map<*, *> ?: continue
             val actionId = map["id"] as? String ?: continue
             val label = map["label"] as? String ?: continue
@@ -263,16 +338,21 @@ class MainActivity : FlutterActivity() {
                 .putExtra(EXTRA_ACTION, actionId)
             val pi = PendingIntent.getBroadcast(
                 this,
-                (requestId + actionId).hashCode() + index,
+                // Monotonic per (requestId, action): hashCode collisions let
+                // Approve overwrite Deny (review #7).
+                requestCodeFor("$requestId:$actionId"),
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             builder.addAction(NotificationCompat.Action(0, label, pi))
         }
 
+        trackApproval(requestId)
         try {
+            // Tagged + monotonic id: never the running service's
+            // NOTIFICATION_ID, whatever requestId hashes to (review #7).
             NotificationManagerCompat.from(this)
-                .notify(requestId.hashCode(), builder.build())
+                .notify(TAG_APPROVALS, notificationIdFor(requestId), builder.build())
         } catch (_: SecurityException) {
             // Permission dropped between check and post; the app UI still works.
         }
@@ -280,6 +360,8 @@ class MainActivity : FlutterActivity() {
 
     private fun cancelApproval(args: Map<*, *>?) {
         val requestId = args?.get("requestId") as? String ?: return
-        NotificationManagerCompat.from(this).cancel(requestId.hashCode())
+        forgetApproval(requestId)
+        NotificationManagerCompat.from(this)
+            .cancel(TAG_APPROVALS, notificationIdFor(requestId))
     }
 }

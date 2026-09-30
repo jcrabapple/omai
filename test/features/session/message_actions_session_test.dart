@@ -18,14 +18,15 @@ import 'package:ohmypi/stream/scheduler.dart';
 import 'package:ohmypi/stream/session_stream.dart';
 import 'package:ohmypi/theme/presets.dart';
 import 'package:ohmypi/composer/drafts.dart';
+import 'package:ohmypi/widgets/items/assistant_message.dart';
 
 import '../../stream/fakes.dart';
 
 http.Response _json(Object? body, {int status = 200}) => http.Response(
-      jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 class _FixedTokenStore implements TokenStore {
   @override
@@ -79,25 +80,27 @@ class FakeGateway {
   final Map<String, Object?> bodies = {};
 
   http.Client client() => MockClient((req) async {
-        if (req.body.isNotEmpty) {
-          final decoded = jsonDecode(req.body);
-          if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
-        }
-        if (req.url.path.endsWith('/messages')) {
-          return _json({'messages': messages});
-        }
-        if (req.url.path.endsWith('/state')) return _json({});
-        if (req.url.path.endsWith('/stats')) return _json({'data': {}});
-        if (req.url.path.endsWith('/commands')) {
-          return _json({'data': {'commands': []}});
-        }
-        return _json({
-          'gwId': 'abc',
-          'cwd': '/work/x',
-          'isStreaming': false,
-          'lastEventSeq': 0,
-        });
+    if (req.body.isNotEmpty) {
+      final decoded = jsonDecode(req.body);
+      if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
+    }
+    if (req.url.path.endsWith('/messages')) {
+      return _json({'messages': messages});
+    }
+    if (req.url.path.endsWith('/state')) return _json({});
+    if (req.url.path.endsWith('/stats')) return _json({'data': {}});
+    if (req.url.path.endsWith('/commands')) {
+      return _json({
+        'data': {'commands': []},
       });
+    }
+    return _json({
+      'gwId': 'abc',
+      'cwd': '/work/x',
+      'isStreaming': false,
+      'lastEventSeq': 0,
+    });
+  });
 }
 
 ProviderContainer _container({
@@ -115,15 +118,19 @@ ProviderContainer _container({
     socketFactory: hub.factory,
     scheduler: const SystemScheduler(),
   );
-  final container = ProviderContainer(overrides: [
-    connectionPrefsProvider.overrideWithValue(
-      MemoryPrefs(const [ConnectionRecord(id: 'c1', url: 'https://g', label: 'G')]),
-    ),
-    tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
-    reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
-    draftKvProvider.overrideWithValue(MemoryDraftKv()),
-    sessionEnvProvider.overrideWith((ref) async => env),
-  ]);
+  final container = ProviderContainer(
+    overrides: [
+      connectionPrefsProvider.overrideWithValue(
+        MemoryPrefs(const [
+          ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
+        ]),
+      ),
+      tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
+      reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
+      draftKvProvider.overrideWithValue(MemoryDraftKv()),
+      sessionEnvProvider.overrideWith((ref) async => env),
+    ],
+  );
   container.read(connectionNotifierProvider.notifier).state = ConnectionState(
     connections: const [
       ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
@@ -134,8 +141,11 @@ ProviderContainer _container({
   return container;
 }
 
-Future<void> _pumpReady(WidgetTester tester, ProviderContainer container,
-    {String gwId = 'abc'}) async {
+Future<void> _pumpReady(
+  WidgetTester tester,
+  ProviderContainer container, {
+  String gwId = 'abc',
+}) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -155,7 +165,13 @@ Future<void> _pumpReady(WidgetTester tester, ProviderContainer container,
 }
 
 Future<void> _openMessageMenu(WidgetTester tester) async {
-  await tester.longPress(find.text('Answer from the agent'));
+  // Review #6: the menu opens from the message's overflow affordance (the
+  // selection toolbar covers the long-press path).
+  final overflow = find.descendant(
+    of: find.byType(AssistantMessage),
+    matching: find.byTooltip('Message actions'),
+  );
+  await tester.tap(overflow.first);
   // Fixed pumps: a running session's spinners repaint forever, so
   // pumpAndSettle would never settle.
   await tester.pump(const Duration(milliseconds: 400));
@@ -179,10 +195,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     final gateway = FakeGateway(messages: history);
-    final container = _container(
-      gateway: gateway,
-      hub: SocketHub(),
-    );
+    final container = _container(gateway: gateway, hub: SocketHub());
     await _pumpReady(tester, container);
 
     await _openMessageMenu(tester);
@@ -194,16 +207,14 @@ void main() {
     expect(find.textContaining('"role": "assistant"'), findsOneWidget);
   });
 
-  testWidgets('Retry turn sends /retry when the session is idle',
-      (tester) async {
+  testWidgets('Retry turn sends /retry when the session is idle', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     final gateway = FakeGateway(messages: history);
-    final container = _container(
-      gateway: gateway,
-      hub: SocketHub(),
-    );
+    final container = _container(gateway: gateway, hub: SocketHub());
     await _pumpReady(tester, container);
 
     await _openMessageMenu(tester);
@@ -230,7 +241,11 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    await _openMessageMenu(tester);
+    // While a turn runs the assistant's onRetry is null: neither the
+    // selection toolbar nor the popup menu offers Retry.
+    await tester.longPress(find.text('Answer from the agent'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Retry turn'), findsNothing);
     expect(find.text('Inspect'), findsOneWidget);
 

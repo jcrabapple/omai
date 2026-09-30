@@ -19,6 +19,9 @@ class MethodChannelKeepaliveSurface implements KeepaliveSurface {
       return r == true;
     } on PlatformException {
       return false;
+    } on MissingPluginException {
+      // No native side (tests, or the engine is gone): report refused.
+      return false;
     }
   }
 
@@ -37,6 +40,8 @@ class MethodChannelKeepaliveSurface implements KeepaliveSurface {
       });
       return r == true;
     } on PlatformException {
+      return false;
+    } on MissingPluginException {
       return false;
     }
   }

@@ -20,6 +20,7 @@ import 'package:ohmypi/stream/session_stream.dart';
 import 'package:ohmypi/transcript/items.dart';
 
 import '../stream/fakes.dart';
+
 /// In-memory reviewed store persistence.
 class MemoryReviewedKv implements ReviewedKv {
   final map = <String, String>{};
@@ -29,9 +30,11 @@ class MemoryReviewedKv implements ReviewedKv {
   Future<void> set(String key, String value) async => map[key] = value;
 }
 
-http.Response _json(Object? body, {int status = 200}) =>
-    http.Response(jsonEncode(body), status,
-        headers: {'content-type': 'application/json'});
+http.Response _json(Object? body, {int status = 200}) => http.Response(
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 /// Hands out pre-made fake sockets in order and remembers them.
 class SocketHub {
@@ -70,8 +73,11 @@ class MemoryPrefs implements ConnectionPrefs {
 
 /// Scriptable gateway: routes the session endpoints, records request order.
 class FakeGateway {
-  FakeGateway({Map<String, Object?>? infoJson, this.messages = const [], this.status = 200})
-      : infoJson = infoJson ?? {};
+  FakeGateway({
+    Map<String, Object?>? infoJson,
+    this.messages = const [],
+    this.status = 200,
+  }) : infoJson = infoJson ?? {};
 
   Map<String, Object?> infoJson = {};
   List<Object?> messages;
@@ -97,40 +103,43 @@ class FakeGateway {
   List<Object?> commands = const [];
 
   http.Client client() => MockClient((req) async {
-        paths.add(req.url.path + (req.url.queryParameters.isEmpty
-            ? ''
-            : '?${req.url.query}'));
-        final body = req.body.isEmpty ? null : jsonDecode(req.body);
-        if (body is Map<String, Object?>) {
-          bodies[req.url.path] = body;
-        }
-        if (failPaths.any(req.url.path.endsWith)) {
-          return _json({'error': 'nope'}, status: status == 200 ? 500 : status);
-        }
-        if (status != 200) {
-          return _json({'error': 'nope'}, status: status);
-        }
-        if (req.url.path.endsWith('/messages')) {
-          final gate = messagesGate;
-          if (gate != null) await gate.future;
-          return _json({'messages': messages});
-        }
-        if (req.url.path.endsWith('/prompt')) {
-          final gate = promptGate;
-          if (gate != null) await gate.future;
-          return _json(infoJson);
-        }
-        if (req.url.path.endsWith('/state')) {
-          return _json(stateBody);
-        }
-        if (req.url.path.endsWith('/stats')) {
-          return _json({'data': {}});
-        }
-        if (req.url.path.endsWith('/commands')) {
-          return _json({'data': {'commands': commands}});
-        }
-        return _json(infoJson);
+    paths.add(
+      req.url.path +
+          (req.url.queryParameters.isEmpty ? '' : '?${req.url.query}'),
+    );
+    final body = req.body.isEmpty ? null : jsonDecode(req.body);
+    if (body is Map<String, Object?>) {
+      bodies[req.url.path] = body;
+    }
+    if (failPaths.any(req.url.path.endsWith)) {
+      return _json({'error': 'nope'}, status: status == 200 ? 500 : status);
+    }
+    if (status != 200) {
+      return _json({'error': 'nope'}, status: status);
+    }
+    if (req.url.path.endsWith('/messages')) {
+      final gate = messagesGate;
+      if (gate != null) await gate.future;
+      return _json({'messages': messages});
+    }
+    if (req.url.path.endsWith('/prompt')) {
+      final gate = promptGate;
+      if (gate != null) await gate.future;
+      return _json(infoJson);
+    }
+    if (req.url.path.endsWith('/state')) {
+      return _json(stateBody);
+    }
+    if (req.url.path.endsWith('/stats')) {
+      return _json({'data': {}});
+    }
+    if (req.url.path.endsWith('/commands')) {
+      return _json({
+        'data': {'commands': commands},
       });
+    }
+    return _json(infoJson);
+  });
 }
 
 ProviderContainer makeContainer({
@@ -141,34 +150,49 @@ ProviderContainer makeContainer({
   DateTime Function()? now,
 }) {
   final sched = scheduler ?? FakeScheduler();
-  final container = ProviderContainer(overrides: [
-    if (reviewedKv != null)
-      reviewedKvProvider.overrideWithValue(reviewedKv)
-    else
-      // send() touches the reviewed store; keep it off SharedPreferences.
-      reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
-    connectionPrefsProvider
-        .overrideWithValue(MemoryPrefs(const [
-      ConnectionRecord(id: 'c1', url: 'https://g', label: 'G')
-    ])),
-    tokenStoreProvider
-        .overrideWithValue(_FixedTokenStore()),
-    gatewayClientFactoryProvider.overrideWith((ref) => (baseUrl, token) =>
-        GatewayClient(baseUrl: baseUrl, token: token,
-            client: gateway.client())),
-    sessionEnvProvider.overrideWith((ref) async => SessionEnv(
-        client: GatewayClient(
-            baseUrl: 'https://g', token: 'tok', client: gateway.client()),
-        baseUrl: 'https://g',
-        token: 'tok',
-        socketFactory: hub.factory,
-        scheduler: sched,
-        now: now ?? DateTime.now)),
-  ]);
-  container.read(connectionNotifierProvider.notifier).state =
-      ConnectionState(connections: const [
-    ConnectionRecord(id: 'c1', url: 'https://g', label: 'G')
-  ], activeId: 'c1');
+  final container = ProviderContainer(
+    overrides: [
+      if (reviewedKv != null)
+        reviewedKvProvider.overrideWithValue(reviewedKv)
+      else
+        // send() touches the reviewed store; keep it off SharedPreferences.
+        reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
+      connectionPrefsProvider.overrideWithValue(
+        MemoryPrefs(const [
+          ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
+        ]),
+      ),
+      tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
+      gatewayClientFactoryProvider.overrideWith(
+        (ref) =>
+            (baseUrl, token) => GatewayClient(
+              baseUrl: baseUrl,
+              token: token,
+              client: gateway.client(),
+            ),
+      ),
+      sessionEnvProvider.overrideWith(
+        (ref) async => SessionEnv(
+          client: GatewayClient(
+            baseUrl: 'https://g',
+            token: 'tok',
+            client: gateway.client(),
+          ),
+          baseUrl: 'https://g',
+          token: 'tok',
+          socketFactory: hub.factory,
+          scheduler: sched,
+          now: now ?? DateTime.now,
+        ),
+      ),
+    ],
+  );
+  container.read(connectionNotifierProvider.notifier).state = ConnectionState(
+    connections: const [
+      ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
+    ],
+    activeId: 'c1',
+  );
   addTearDown(container.dispose);
   return container;
 }
@@ -177,21 +201,21 @@ Map<String, Object?> infoJson({
   String gwId = 'abc',
   int lastEventSeq = 0,
   bool isStreaming = false,
-}) =>
-    {
-      'gwId': gwId,
-      'cwd': '/work/x',
-      'isStreaming': isStreaming,
-      'lastEventSeq': lastEventSeq,
-    };
+}) => {
+  'gwId': gwId,
+  'cwd': '/work/x',
+  'isStreaming': isStreaming,
+  'lastEventSeq': lastEventSeq,
+};
 
 void main() {
-  test('open sequence: info, then messages, then the socket with after=lastEventSeq',
-      () async {
+  test('open sequence: info, then messages, then the socket with after=lastEventSeq', () async {
     final gateway = FakeGateway(
-        infoJson: infoJson(lastEventSeq: 3), messages: [
-      {'role': 'user', 'content': 'hi'}
-    ]);
+      infoJson: infoJson(lastEventSeq: 3),
+      messages: [
+        {'role': 'user', 'content': 'hi'},
+      ],
+    );
     final hub = SocketHub();
     final container = makeContainer(gateway: gateway, hub: hub);
 
@@ -209,7 +233,11 @@ void main() {
 
     final s = container.read(sessionControllerProvider('abc'));
     expect(s.phase, SessionPhase.ready);
-    expect(s.transcript.items, isNotEmpty, reason: 'history paints the transcript');
+    expect(
+      s.transcript.items,
+      isNotEmpty,
+      reason: 'history paints the transcript',
+    );
     expect(s.running, isFalse);
   });
 
@@ -224,50 +252,73 @@ void main() {
 
     hub.current.frame(1, {'type': 'agent_start'});
     expect(container.read(sessionControllerProvider('abc')).running, isTrue);
-    expect(container.read(sessionControllerProvider('abc')).activity, isNotNull);
+    expect(
+      container.read(sessionControllerProvider('abc')).activity,
+      isNotNull,
+    );
 
     hub.current.frame(2, {'type': 'agent_end'});
-    expect(container.read(sessionControllerProvider('abc')).running, isFalse,
-        reason: 'agent_end always clears running');
+    expect(
+      container.read(sessionControllerProvider('abc')).running,
+      isFalse,
+      reason: 'agent_end always clears running',
+    );
     expect(container.read(sessionControllerProvider('abc')).activity, isNull);
   });
 
-  test('a resync replaces state: fresh info with isStreaming false clears running',
-      () async {
-    final gateway = FakeGateway(infoJson: infoJson());
-    final hub = SocketHub();
-    final scheduler = FakeScheduler();
-    final container = makeContainer(
-        gateway: gateway, hub: hub, scheduler: scheduler);
-    final provider = sessionControllerProvider('abc');
-    final sub = container.listen(provider, (previous, next) {});
-    addTearDown(sub.close);
-    await pumpEventQueue();
+  test(
+    'a resync replaces state: fresh info with isStreaming false clears running',
+    () async {
+      final gateway = FakeGateway(infoJson: infoJson());
+      final hub = SocketHub();
+      final scheduler = FakeScheduler();
+      final container = makeContainer(
+        gateway: gateway,
+        hub: hub,
+        scheduler: scheduler,
+      );
+      final provider = sessionControllerProvider('abc');
+      final sub = container.listen(provider, (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
 
-    hub.current.frame(1, {'type': 'agent_start'});
-    expect(container.read(sessionControllerProvider('abc')).running, isTrue);
+      hub.current.frame(1, {'type': 'agent_start'});
+      expect(container.read(sessionControllerProvider('abc')).running, isTrue);
 
-    // Reconnect; the server answers auth_ok with gap:true on the new socket,
-    // which triggers a resync: a fresh snapshot whose info.isStreaming is
-    // false.
-    hub.current.serverClose(1006);
-    await pumpEventQueue();
-    await scheduler.elapse(31000);
-    await pumpEventQueue();
-    expect(hub.sockets.length, greaterThan(1),
-        reason: 'the stream reconnected');
-    hub.current.authOk(gap: true);
-    gateway.messages = [
-      {'role': 'user', 'content': 'hi'}
-    ];
-    await pumpEventQueue();
+      // Reconnect; the server answers auth_ok with gap:true on the new socket,
+      // which triggers a resync: a fresh snapshot whose info.isStreaming is
+      // false.
+      hub.current.serverClose(1006);
+      await pumpEventQueue();
+      await scheduler.elapse(31000);
+      await pumpEventQueue();
+      expect(
+        hub.sockets.length,
+        greaterThan(1),
+        reason: 'the stream reconnected',
+      );
+      hub.current.authOk(gap: true);
+      gateway.messages = [
+        {'role': 'user', 'content': 'hi'},
+      ];
+      await pumpEventQueue();
 
-    expect(container.read(sessionControllerProvider('abc')).running, isFalse,
-        reason: 'the resync snapshot resets the turn state');
-    expect(container.read(sessionControllerProvider('abc')).activity, isNull,
-        reason: 'a resync that ends the turn also clears the activity line');
-    expect(container.read(sessionControllerProvider('abc')).transcript.items, isNotEmpty);
-  });
+      expect(
+        container.read(sessionControllerProvider('abc')).running,
+        isFalse,
+        reason: 'the resync snapshot resets the turn state',
+      );
+      expect(
+        container.read(sessionControllerProvider('abc')).activity,
+        isNull,
+        reason: 'a resync that ends the turn also clears the activity line',
+      );
+      expect(
+        container.read(sessionControllerProvider('abc')).transcript.items,
+        isNotEmpty,
+      );
+    },
+  );
 
   test('fresh info reporting isStreaming:false clears running', () async {
     final gateway = FakeGateway(infoJson: infoJson());
@@ -282,13 +333,24 @@ void main() {
     expect(container.read(sessionControllerProvider('abc')).running, isTrue);
 
     gateway.infoJson = infoJson(isStreaming: false);
-    await container.read(sessionControllerProvider('abc').notifier).refreshInfo();
+    await container
+        .read(sessionControllerProvider('abc').notifier)
+        .refreshInfo();
 
-    expect(container.read(sessionControllerProvider('abc')).running, isFalse,
-        reason: 'isStreaming:false in fresh info always clears running');
-    expect(container.read(sessionControllerProvider('abc')).activity, isNull,
-        reason: 'fresh info ending the turn clears the activity line');
-    expect(container.read(sessionControllerProvider('abc')).info?.isStreaming, isFalse);
+    expect(
+      container.read(sessionControllerProvider('abc')).running,
+      isFalse,
+      reason: 'isStreaming:false in fresh info always clears running',
+    );
+    expect(
+      container.read(sessionControllerProvider('abc')).activity,
+      isNull,
+      reason: 'fresh info ending the turn clears the activity line',
+    );
+    expect(
+      container.read(sessionControllerProvider('abc')).info?.isStreaming,
+      isFalse,
+    );
   });
 
   test('onGone: close 4404 puts the session in the gone phase', () async {
@@ -301,13 +363,22 @@ void main() {
     await pumpEventQueue();
 
     hub.current.frame(1, {'type': 'agent_start'});
-    expect(container.read(sessionControllerProvider('abc')).activity, isNotNull);
+    expect(
+      container.read(sessionControllerProvider('abc')).activity,
+      isNotNull,
+    );
     hub.current.serverClose(4404);
     await pumpEventQueue();
 
-    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.gone);
-    expect(container.read(sessionControllerProvider('abc')).activity, isNull,
-        reason: 'going away clears the activity line');
+    expect(
+      container.read(sessionControllerProvider('abc')).phase,
+      SessionPhase.gone,
+    );
+    expect(
+      container.read(sessionControllerProvider('abc')).activity,
+      isNull,
+      reason: 'going away clears the activity line',
+    );
   });
 
   test('a 404 on open puts the session in the gone phase', () async {
@@ -319,7 +390,10 @@ void main() {
     addTearDown(sub.close);
     await pumpEventQueue();
 
-    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.gone);
+    expect(
+      container.read(sessionControllerProvider('abc')).phase,
+      SessionPhase.gone,
+    );
     expect(hub.sockets, isEmpty, reason: 'no socket for a gone session');
   });
 
@@ -332,7 +406,10 @@ void main() {
     addTearDown(sub.close);
     await pumpEventQueue();
 
-    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.error);
+    expect(
+      container.read(sessionControllerProvider('abc')).phase,
+      SessionPhase.error,
+    );
     final connection = container.read(connectionNotifierProvider);
     expect(connection.active, isNull);
     expect(connection.connections, isEmpty);
@@ -370,11 +447,14 @@ void main() {
     // controller must stop the stream (see also the autoDispose tests below).
     container.dispose();
     await pumpEventQueue();
-    expect(sock.closed, isTrue, reason: 'disposing the controller closes the socket');
+    expect(
+      sock.closed,
+      isTrue,
+      reason: 'disposing the controller closes the socket',
+    );
   });
 
-  test('autoDispose: the last listener leaving closes the socket and cancels timers',
-      () async {
+  test('autoDispose: the last listener leaving closes the socket and cancels timers', () async {
     final gateway = FakeGateway(infoJson: infoJson());
     final hub = SocketHub();
     final container = makeContainer(gateway: gateway, hub: hub);
@@ -382,8 +462,9 @@ void main() {
     final sub = container.listen(provider, (previous, next) {});
     await pumpEventQueue();
     final sock = hub.current;
-    final statsAfterOpen =
-        gateway.paths.where((p) => p.endsWith('/stats')).length;
+    final statsAfterOpen = gateway.paths
+        .where((p) => p.endsWith('/stats'))
+        .length;
 
     // A turn ends right before the user leaves: the post-turn stats timer
     // is armed.
@@ -392,58 +473,79 @@ void main() {
 
     sub.close();
     await pumpEventQueue();
-    expect(sock.closed, isTrue,
-        reason: 'autoDispose tears the socket down with the last listener');
+    expect(
+      sock.closed,
+      isTrue,
+      reason: 'autoDispose tears the socket down with the last listener',
+    );
 
     // The 600ms post-turn timer must not fire in the background.
     await Future<void>.delayed(const Duration(milliseconds: 700));
-    expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
-        statsAfterOpen,
-        reason: 'no stats refresh after the provider is disposed');
+    expect(
+      gateway.paths.where((p) => p.endsWith('/stats')).length,
+      statsAfterOpen,
+      reason: 'no stats refresh after the provider is disposed',
+    );
   });
 
-  test('autoDispose: reopening after a failed open retries with a fresh instance',
-      () async {
-    final gateway = FakeGateway(status: 500);
-    final hub = SocketHub();
-    final container = makeContainer(gateway: gateway, hub: hub);
-    final provider = sessionControllerProvider('abc');
-    final sub = container.listen(provider, (previous, next) {});
-    await pumpEventQueue();
-    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.error);
+  test(
+    'autoDispose: reopening after a failed open retries with a fresh instance',
+    () async {
+      final gateway = FakeGateway(status: 500);
+      final hub = SocketHub();
+      final container = makeContainer(gateway: gateway, hub: hub);
+      final provider = sessionControllerProvider('abc');
+      final sub = container.listen(provider, (previous, next) {});
+      await pumpEventQueue();
+      expect(
+        container.read(sessionControllerProvider('abc')).phase,
+        SessionPhase.error,
+      );
 
-    sub.close();
-    await pumpEventQueue();
-    gateway.status = 200;
-    gateway.infoJson = infoJson(lastEventSeq: 0);
-    final sub2 = container.listen(provider, (previous, next) {});
-    addTearDown(sub2.close);
-    await pumpEventQueue();
+      sub.close();
+      await pumpEventQueue();
+      gateway.status = 200;
+      gateway.infoJson = infoJson(lastEventSeq: 0);
+      final sub2 = container.listen(provider, (previous, next) {});
+      addTearDown(sub2.close);
+      await pumpEventQueue();
 
-    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.ready,
-        reason: 'a fresh open replaces the cached error');
-    expect(hub.sockets, isNotEmpty,
-        reason: 'the retry opens a socket for the session');
-  });
+      expect(
+        container.read(sessionControllerProvider('abc')).phase,
+        SessionPhase.ready,
+        reason: 'a fresh open replaces the cached error',
+      );
+      expect(
+        hub.sockets,
+        isNotEmpty,
+        reason: 'the retry opens a socket for the session',
+      );
+    },
+  );
 
-  test('a dispose while the open is in flight opens no socket and does not throw',
-      () async {
-    final gateway = FakeGateway()..messagesGate = Completer<void>();
-    final hub = SocketHub();
-    final container = makeContainer(gateway: gateway, hub: hub);
-    final provider = sessionControllerProvider('abc');
-    final sub = container.listen(provider, (previous, next) {});
-    await pumpEventQueue();
-    expect(hub.sockets, isEmpty, reason: 'still fetching history');
+  test(
+    'a dispose while the open is in flight opens no socket and does not throw',
+    () async {
+      final gateway = FakeGateway()..messagesGate = Completer<void>();
+      final hub = SocketHub();
+      final container = makeContainer(gateway: gateway, hub: hub);
+      final provider = sessionControllerProvider('abc');
+      final sub = container.listen(provider, (previous, next) {});
+      await pumpEventQueue();
+      expect(hub.sockets, isEmpty, reason: 'still fetching history');
 
-    sub.close();
-    await pumpEventQueue();
-    gateway.messagesGate!.complete();
-    await pumpEventQueue();
+      sub.close();
+      await pumpEventQueue();
+      gateway.messagesGate!.complete();
+      await pumpEventQueue();
 
-    expect(hub.sockets, isEmpty,
-        reason: 'a disposed controller never opens a socket');
-  });
+      expect(
+        hub.sockets,
+        isEmpty,
+        reason: 'a disposed controller never opens a socket',
+      );
+    },
+  );
 
   test('pause cancels the post-turn stats timer; resume runs it', () async {
     final gateway = FakeGateway(infoJson: infoJson());
@@ -453,8 +555,9 @@ void main() {
     final sub = container.listen(provider, (previous, next) {});
     addTearDown(sub.close);
     await pumpEventQueue();
-    final statsAfterOpen =
-        gateway.paths.where((p) => p.endsWith('/stats')).length;
+    final statsAfterOpen = gateway.paths
+        .where((p) => p.endsWith('/stats'))
+        .length;
 
     hub.current.frame(1, {'type': 'agent_start'});
     hub.current.frame(2, {'type': 'agent_end'});
@@ -462,38 +565,50 @@ void main() {
 
     container.read(sessionControllerProvider('abc').notifier).pause();
     await Future<void>.delayed(const Duration(milliseconds: 700));
-    expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
-        statsAfterOpen,
-        reason: 'a paused session makes no background REST calls');
+    expect(
+      gateway.paths.where((p) => p.endsWith('/stats')).length,
+      statsAfterOpen,
+      reason: 'a paused session makes no background REST calls',
+    );
 
     container.read(sessionControllerProvider('abc').notifier).resume();
     await Future<void>.delayed(const Duration(milliseconds: 700));
-    expect(gateway.paths.where((p) => p.endsWith('/stats')).length,
-        greaterThan(statsAfterOpen),
-        reason: 'resume runs the stats refresh that was pending');
+    expect(
+      gateway.paths.where((p) => p.endsWith('/stats')).length,
+      greaterThan(statsAfterOpen),
+      reason: 'resume runs the stats refresh that was pending',
+    );
   });
 
-  test('a 404 on open also removes the session from the sessions store',
-      () async {
-    final gateway = FakeGateway(status: 404);
-    final hub = SocketHub();
-    final container = makeContainer(gateway: gateway, hub: hub);
-    container.read(sessionsStoreProvider.notifier);
-    await pumpEventQueue();
-    container
-        .read(sessionsStoreProvider.notifier)
-        .patch(SessionInfo.fromJson({'gwId': 'abc', 'cwd': '/work'}));
-    expect(container.read(sessionsStoreProvider).live, isNotEmpty);
+  test(
+    'a 404 on open also removes the session from the sessions store',
+    () async {
+      final gateway = FakeGateway(status: 404);
+      final hub = SocketHub();
+      final container = makeContainer(gateway: gateway, hub: hub);
+      container.read(sessionsStoreProvider.notifier);
+      await pumpEventQueue();
+      container
+          .read(sessionsStoreProvider.notifier)
+          .patch(SessionInfo.fromJson({'gwId': 'abc', 'cwd': '/work'}));
+      expect(container.read(sessionsStoreProvider).live, isNotEmpty);
 
-    final provider = sessionControllerProvider('abc');
-    final sub = container.listen(provider, (previous, next) {});
-    addTearDown(sub.close);
-    await pumpEventQueue();
+      final provider = sessionControllerProvider('abc');
+      final sub = container.listen(provider, (previous, next) {});
+      addTearDown(sub.close);
+      await pumpEventQueue();
 
-    expect(container.read(sessionControllerProvider('abc')).phase, SessionPhase.gone);
-    expect(container.read(sessionsStoreProvider).live, isEmpty,
-        reason: 'a gone session disappears from the rail immediately');
-  });
+      expect(
+        container.read(sessionControllerProvider('abc')).phase,
+        SessionPhase.gone,
+      );
+      expect(
+        container.read(sessionsStoreProvider).live,
+        isEmpty,
+        reason: 'a gone session disappears from the rail immediately',
+      );
+    },
+  );
 
   test('pause and resume are forwarded to the stream', () async {
     final gateway = FakeGateway(infoJson: infoJson());
@@ -511,15 +626,18 @@ void main() {
   });
 
   group('D2a actions', () {
-    Future<(ProviderContainer, FakeGateway, SocketHub)> open(
-        {FakeGateway? gw, List<Object?> commands = const []}) async {
-      final gateway = gw ??
-          FakeGateway(infoJson: infoJson())
-            ..commands = commands;
+    Future<(ProviderContainer, FakeGateway, SocketHub)> open({
+      FakeGateway? gw,
+      List<Object?> commands = const [],
+    }) async {
+      final gateway = gw ?? FakeGateway(infoJson: infoJson())
+        ..commands = commands;
       final hub = SocketHub();
       final container = makeContainer(gateway: gateway, hub: hub);
       final sub = container.listen(
-          sessionControllerProvider('abc'), (previous, next) {});
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
       addTearDown(sub.close);
       await pumpEventQueue();
       return (container, gateway, hub);
@@ -533,9 +651,13 @@ void main() {
           .send('do the thing', mode: 'prompt');
       expect(ok, isTrue);
       expect(
-          gateway.bodies['/api/sessions/abc/prompt'],
-          containsPair('message', 'do the thing'));
-      expect((gateway.bodies['/api/sessions/abc/prompt'] as Map)['mode'], 'prompt');
+        gateway.bodies['/api/sessions/abc/prompt'],
+        containsPair('message', 'do the thing'),
+      );
+      expect(
+        (gateway.bodies['/api/sessions/abc/prompt'] as Map)['mode'],
+        'prompt',
+      );
       // The optimistic bubble is in the transcript.
       final userItems = container
           .read(sessionControllerProvider('abc'))
@@ -546,104 +668,141 @@ void main() {
       expect(userItems, isNotEmpty);
     });
 
-    test('a steer send posts mode steer and refreshes the queue count',
-        () async {
-      final (container, gateway, hub) = await open();
-      hub.current;
-      final ok = await container
-          .read(sessionControllerProvider('abc').notifier)
-          .send('push left', mode: 'steer');
-      expect(ok, isTrue);
-      expect((gateway.bodies['/api/sessions/abc/prompt'] as Map)['mode'], 'steer');
-      expect(gateway.paths.any((p) => p.endsWith('/state')), isTrue,
-          reason: 'steer/follow_up sends refresh the queued count');
-    });
+    test(
+      'a steer send posts mode steer and refreshes the queue count',
+      () async {
+        final (container, gateway, hub) = await open();
+        hub.current;
+        final ok = await container
+            .read(sessionControllerProvider('abc').notifier)
+            .send('push left', mode: 'steer');
+        expect(ok, isTrue);
+        expect(
+          (gateway.bodies['/api/sessions/abc/prompt'] as Map)['mode'],
+          'steer',
+        );
+        expect(
+          gateway.paths.any((p) => p.endsWith('/state')),
+          isTrue,
+          reason: 'steer/follow_up sends refresh the queued count',
+        );
+      },
+    );
 
-    test('durable send: failure makes a failed bubble, retry succeeds',
-        () async {
-      final (container, gateway, hub) = await open();
-      hub.current;
-      gateway.failPaths.add('/prompt');
+    test(
+      'durable send: failure makes a failed bubble, retry succeeds',
+      () async {
+        final (container, gateway, hub) = await open();
+        hub.current;
+        gateway.failPaths.add('/prompt');
 
-      final ok = await container
-          .read(sessionControllerProvider('abc').notifier)
-          .send('precious text', mode: 'prompt');
-      expect(ok, isFalse, reason: 'the gateway rejected the prompt');
-      final items = container.read(sessionControllerProvider('abc')).transcript.items;
-      final failed = items.last as UserItem;
-      expect(failed.text, 'precious text');
-      expect(failed.pending, isFalse);
-      expect(failed.failed, isTrue);
-      expect(failed.error, isNotEmpty,
-          reason: 'the failed bubble explains why');
+        final ok = await container
+            .read(sessionControllerProvider('abc').notifier)
+            .send('precious text', mode: 'prompt');
+        expect(ok, isFalse, reason: 'the gateway rejected the prompt');
+        final items = container
+            .read(sessionControllerProvider('abc'))
+            .transcript
+            .items;
+        final failed = items.last as UserItem;
+        expect(failed.text, 'precious text');
+        expect(failed.pending, isFalse);
+        expect(failed.failed, isTrue);
+        expect(
+          failed.error,
+          isNotEmpty,
+          reason: 'the failed bubble explains why',
+        );
 
-      // Retry: the same words go out again and this time land.
-      gateway.failPaths.clear();
-      final ok2 = await container
-          .read(sessionControllerProvider('abc').notifier)
-          .send('precious text', mode: 'prompt');
-      expect(ok2, isTrue);
-      expect(
-          gateway.paths.where((p) => p.endsWith('/prompt')).length, 2);
-    });
+        // Retry: the same words go out again and this time land.
+        gateway.failPaths.clear();
+        final ok2 = await container
+            .read(sessionControllerProvider('abc').notifier)
+            .send('precious text', mode: 'prompt');
+        expect(ok2, isTrue);
+        expect(gateway.paths.where((p) => p.endsWith('/prompt')).length, 2);
+      },
+    );
 
-    test('the review pin clears only after the ack (ported reviewed tests)',
-        () async {
-      final kv = MemoryReviewedKv();
-      final gateway = FakeGateway(infoJson: infoJson());
-      final hub = SocketHub();
-      final container =
-          makeContainer(gateway: gateway, hub: hub, reviewedKv: kv);
-      final provider = sessionControllerProvider('abc');
-      final sub = container.listen(provider, (previous, next) {});
-      addTearDown(sub.close);
-      await pumpEventQueue();
-      await container.read(reviewedStoreProvider.notifier).flag('abc');
-      expect(
+    test(
+      'the review pin clears only after the ack (ported reviewed tests)',
+      () async {
+        final kv = MemoryReviewedKv();
+        final gateway = FakeGateway(infoJson: infoJson());
+        final hub = SocketHub();
+        final container = makeContainer(
+          gateway: gateway,
+          hub: hub,
+          reviewedKv: kv,
+        );
+        final provider = sessionControllerProvider('abc');
+        final sub = container.listen(provider, (previous, next) {});
+        addTearDown(sub.close);
+        await pumpEventQueue();
+        await container.read(reviewedStoreProvider.notifier).flag('abc');
+        expect(
           container.read(reviewedStoreProvider).needsReview.contains('abc'),
-          isTrue);
+          isTrue,
+        );
 
-      // A failed send keeps the pin.
-      gateway.failPaths.add('/prompt');
-      await container.read(sessionControllerProvider('abc').notifier).send('again');
-      expect(
+        // A failed send keeps the pin.
+        gateway.failPaths.add('/prompt');
+        await container
+            .read(sessionControllerProvider('abc').notifier)
+            .send('again');
+        expect(
           container.read(reviewedStoreProvider).needsReview.contains('abc'),
-          isTrue, reason: 'a failed send keeps the review pin');
+          isTrue,
+          reason: 'a failed send keeps the review pin',
+        );
 
-      // A successful send clears it.
-      gateway.failPaths.clear();
-      await container.read(sessionControllerProvider('abc').notifier).send('again');
-      expect(
+        // A successful send clears it.
+        gateway.failPaths.clear();
+        await container
+            .read(sessionControllerProvider('abc').notifier)
+            .send('again');
+        expect(
           container.read(reviewedStoreProvider).needsReview.contains('abc'),
-          isFalse, reason: 'sending a prompt clears the review pin');
-    });
+          isFalse,
+          reason: 'sending a prompt clears the review pin',
+        );
+      },
+    );
 
-    test('answerUi posts the answer payload; ui_resolved clears the dialog',
-        () async {
-      final gw = FakeGateway(infoJson: infoJson())
-        ..infoJson['pendingUi'] = [
-          {'id': 'r1', 'method': 'confirm', 'title': 'Allow edit'}
-        ];
-      final (container, gateway, hub) = await open(gw: gw);
-      expect(container.read(sessionControllerProvider('abc')).pendingUi, hasLength(1));
+    test(
+      'answerUi posts the answer payload; ui_resolved clears the dialog',
+      () async {
+        final gw = FakeGateway(infoJson: infoJson())
+          ..infoJson['pendingUi'] = [
+            {'id': 'r1', 'method': 'confirm', 'title': 'Allow edit'},
+          ];
+        final (container, gateway, hub) = await open(gw: gw);
+        expect(
+          container.read(sessionControllerProvider('abc')).pendingUi,
+          hasLength(1),
+        );
 
-      await container
-          .read(sessionControllerProvider('abc').notifier)
-          .answerUi('r1', {'confirmed': true});
-      expect(gateway.bodies['/api/sessions/abc/ui/r1'],
-          {'confirmed': true},
-          reason: 'the answer payload goes through verbatim');
+        await container
+            .read(sessionControllerProvider('abc').notifier)
+            .answerUi('r1', {'confirmed': true});
+        expect(gateway.bodies['/api/sessions/abc/ui/r1'], {
+          'confirmed': true,
+        }, reason: 'the answer payload goes through verbatim');
 
-      // The dialog stays until the ui_resolved event (or a local drop).
-      expect(container.read(sessionControllerProvider('abc')).pendingUi, hasLength(1));
-      hub.current.frame(5, {
-        'type': 'ui_resolved',
-        'id': 'r1',
-      });
-      await pumpEventQueue();
-      expect(container.read(sessionControllerProvider('abc')).pendingUi, isEmpty,
-          reason: 'ui_resolved removes the dialog');
-    });
+        // The dialog stays until the ui_resolved event (or a local drop).
+        expect(
+          container.read(sessionControllerProvider('abc')).pendingUi,
+          hasLength(1),
+        );
+        hub.current.frame(5, {'type': 'ui_resolved', 'id': 'r1'});
+        await pumpEventQueue();
+        expect(
+          container.read(sessionControllerProvider('abc')).pendingUi,
+          isEmpty,
+          reason: 'ui_resolved removes the dialog',
+        );
+      },
+    );
 
     test('dropUi removes a dialog locally (e.g. after a 409)', () async {
       final (container, gateway, hub) = await open();
@@ -651,7 +810,10 @@ void main() {
       container
           .read(sessionControllerProvider('abc').notifier)
           .dropUi('anything'); // no-op on an empty list
-      expect(container.read(sessionControllerProvider('abc')).pendingUi, isEmpty);
+      expect(
+        container.read(sessionControllerProvider('abc')).pendingUi,
+        isEmpty,
+      );
     });
 
     test('abort posts to the abort endpoint', () async {
@@ -661,35 +823,39 @@ void main() {
       expect(gateway.paths.any((p) => p.endsWith('/abort')), isTrue);
     });
 
-    test('setModel, setThinking, rename and compact post and refresh info',
-        () async {
-      final (container, gateway, hub) = await open();
-      hub.current;
-      final n = gateway.paths.length;
-      final c = container.read(sessionControllerProvider('abc').notifier);
-      await c.setModel('anthropic', 'claude-x');
-      expect(gateway.bodies['/api/sessions/abc/model'],
-          {'provider': 'anthropic', 'modelId': 'claude-x'});
-      await c.setThinking('low');
-      expect(
-          gateway.bodies['/api/sessions/abc/thinking'], {'level': 'low'});
-      await c.rename('New name');
-      expect(gateway.bodies['/api/sessions/abc/name'], {'name': 'New name'});
-      await c.compact('keep the plan');
-      expect(gateway.bodies['/api/sessions/abc/compact'],
-          {'instructions': 'keep the plan'});
-      // Each action refreshes info afterwards.
-      expect(
+    test(
+      'setModel, setThinking, rename and compact post and refresh info',
+      () async {
+        final (container, gateway, hub) = await open();
+        hub.current;
+        final n = gateway.paths.length;
+        final c = container.read(sessionControllerProvider('abc').notifier);
+        await c.setModel('anthropic', 'claude-x');
+        expect(gateway.bodies['/api/sessions/abc/model'], {
+          'provider': 'anthropic',
+          'modelId': 'claude-x',
+        });
+        await c.setThinking('low');
+        expect(gateway.bodies['/api/sessions/abc/thinking'], {'level': 'low'});
+        await c.rename('New name');
+        expect(gateway.bodies['/api/sessions/abc/name'], {'name': 'New name'});
+        await c.compact('keep the plan');
+        expect(gateway.bodies['/api/sessions/abc/compact'], {
+          'instructions': 'keep the plan',
+        });
+        // Each action refreshes info afterwards.
+        expect(
           gateway.paths
               .sublist(n)
               .where((p) => p == '/api/sessions/abc')
               .length,
           4,
-          reason: 'every action refetches info');
-    });
+          reason: 'every action refetches info',
+        );
+      },
+    );
 
-    test('slash commands load from /commands with their full shape',
-        () async {
+    test('slash commands load from /commands with their full shape', () async {
       final (container, gateway, hub) = await open();
       hub.current;
       gateway.commands = [
@@ -718,9 +884,14 @@ void main() {
       final gateway = FakeGateway(infoJson: infoJson());
       final hub = SocketHub();
       final container = makeContainer(
-          gateway: gateway, hub: hub, now: () => DateTime.fromMillisecondsSinceEpoch(ms));
+        gateway: gateway,
+        hub: hub,
+        now: () => DateTime.fromMillisecondsSinceEpoch(ms),
+      );
       final sub = container.listen(
-          sessionControllerProvider('abc'), (previous, next) {});
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
       addTearDown(sub.close);
       await pumpEventQueue();
 
@@ -755,8 +926,11 @@ void main() {
       final stats = container.read(sessionControllerProvider('abc')).turnStats;
       expect(stats, isNotNull);
       expect(stats!.ttftMs, 600);
-      expect(stats.tokensPerSec, closeTo(10.0, 0.001),
-          reason: '50 output tokens over a 5 s stream');
+      expect(
+        stats.tokensPerSec,
+        closeTo(10.0, 0.001),
+        reason: '50 output tokens over a 5 s stream',
+      );
       expect(stats.lastEventSeq, 4);
     });
 
@@ -765,7 +939,9 @@ void main() {
       final hub = SocketHub();
       final container = makeContainer(gateway: gateway, hub: hub);
       final sub = container.listen(
-          sessionControllerProvider('abc'), (previous, next) {});
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
       addTearDown(sub.close);
       await pumpEventQueue();
 
@@ -787,33 +963,178 @@ void main() {
       expect(stats.ttftMs, isNotNull);
     });
 
-    test('stream reconnects are counted from live to down and land in state',
-        () async {
+    test(
+      'stream reconnects are counted from live to down and land in state',
+      () async {
+        final gateway = FakeGateway(infoJson: infoJson());
+        final hub = SocketHub();
+        final scheduler = FakeScheduler();
+        final container = makeContainer(
+          gateway: gateway,
+          hub: hub,
+          scheduler: scheduler,
+        );
+        final sub = container.listen(
+          sessionControllerProvider('abc'),
+          (previous, next) {},
+        );
+        addTearDown(sub.close);
+        await pumpEventQueue();
+
+        // Live (the fake socket only turns live after auth_ok):
+        hub.current.authOk();
+        await pumpEventQueue();
+        hub.current.frame(1, {'type': 'agent_start'});
+        await pumpEventQueue();
+        expect(
+          container.read(sessionControllerProvider('abc')).streamReconnects,
+          0,
+        );
+
+        // The server drops the connection: the stream reports a retry state.
+        hub.current.serverClose(1006, 'abnormal');
+        await pumpEventQueue();
+        await pumpEventQueue();
+        expect(
+          container.read(sessionControllerProvider('abc')).streamReconnects,
+          greaterThanOrEqualTo(1),
+          reason: 'a dropped live socket counts as one reconnect',
+        );
+      },
+    );
+
+    test(
+      'a voluntary pause does not count as a stream reconnect (review #13)',
+      () async {
+        final gateway = FakeGateway(infoJson: infoJson());
+        final hub = SocketHub();
+        final container = makeContainer(gateway: gateway, hub: hub);
+        final sub = container.listen(
+          sessionControllerProvider('abc'),
+          (previous, next) {},
+        );
+        addTearDown(sub.close);
+        await pumpEventQueue();
+
+        hub.current.authOk();
+        await pumpEventQueue();
+        // The app backgrounds while idle: the controller pauses the socket on
+        // purpose. That is not a dropped connection.
+        container.read(sessionControllerProvider('abc').notifier).pause();
+        await pumpEventQueue();
+        await pumpEventQueue();
+        expect(
+          container.read(sessionControllerProvider('abc')).streamReconnects,
+          0,
+          reason: 'a voluntary pause is not a reconnect',
+        );
+      },
+    );
+
+    test('review #11: tokens per second is client clock only, never mixed with '
+        'the server message timestamp', () async {
+      var ms = 1000;
       final gateway = FakeGateway(infoJson: infoJson());
       final hub = SocketHub();
-      final scheduler = FakeScheduler();
       final container = makeContainer(
-          gateway: gateway, hub: hub, scheduler: scheduler);
+        gateway: gateway,
+        hub: hub,
+        now: () => DateTime.fromMillisecondsSinceEpoch(ms),
+      );
       final sub = container.listen(
-          sessionControllerProvider('abc'), (previous, next) {});
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
       addTearDown(sub.close);
       await pumpEventQueue();
 
-      // Live (the fake socket only turns live after auth_ok):
-      hub.current.authOk();
-      await pumpEventQueue();
-      hub.current.frame(1, {'type': 'agent_start'});
-      await pumpEventQueue();
-      expect(container.read(sessionControllerProvider('abc')).streamReconnects, 0);
+      hub.current.frame(1, {'type': 'agent_start'}); // clock: 1000
+      ms = 1600; // first assistant delta
+      hub.current.frame(2, {
+        'type': 'message_update',
+        'message': {
+          'role': 'assistant',
+          'content': [
+            {'type': 'text', 'text': 'working'},
+          ],
+          // Server clock, deliberately skewed far away from the client
+          // clock: mixing the two produced garbage tok/s.
+          'timestamp': 9_999_999_999,
+        },
+      });
+      ms = 6600;
+      hub.current.frame(3, {
+        'type': 'message_end',
+        'messageId': 'm-1',
+        'message': {
+          'role': 'assistant',
+          'content': [
+            {'type': 'text', 'text': 'working'},
+          ],
+          'usage': {'output': 50, 'input': 10},
+          // No duration field: the fallback previously mixed
+          // server timestamp minus client turn start.
+          'timestamp': 9_999_999_999,
+        },
+      });
+      hub.current.frame(4, {'type': 'agent_end'}); // clock: 6600
 
-      // The server drops the connection: the stream reports a retry state.
-      hub.current.serverClose(1006, 'abnormal');
+      final stats = container.read(sessionControllerProvider('abc')).turnStats;
+      expect(stats, isNotNull);
+      // 50 output tokens over the 5 s from the first delta to turn end,
+      // both read from the fake client clock.
+      expect(stats!.tokensPerSec, closeTo(10.0, 0.001));
+    });
+
+    test('no tokens per second for a sub-500ms stream (review #11)', () async {
+      var ms = 1000;
+      final gateway = FakeGateway(infoJson: infoJson());
+      final hub = SocketHub();
+      final container = makeContainer(
+        gateway: gateway,
+        hub: hub,
+        now: () => DateTime.fromMillisecondsSinceEpoch(ms),
+      );
+      final sub = container.listen(
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
+      addTearDown(sub.close);
       await pumpEventQueue();
-      await pumpEventQueue();
+
+      hub.current.frame(1, {'type': 'agent_start'}); // clock: 1000
+      ms = 1100; // first delta
+      hub.current.frame(2, {
+        'type': 'message_update',
+        'message': {
+          'role': 'assistant',
+          'content': [
+            {'type': 'text', 'text': 'hi'},
+          ],
+          'timestamp': 100,
+        },
+      });
+      ms = 1300; // turn ends 200ms after the first delta
+      hub.current.frame(3, {
+        'type': 'message_end',
+        'messageId': 'm-1',
+        'message': {
+          'role': 'assistant',
+          'content': [
+            {'type': 'text', 'text': 'hi'},
+          ],
+          'usage': {'output': 50, 'input': 10},
+          'timestamp': 100,
+        },
+      });
+      hub.current.frame(4, {'type': 'agent_end'});
+
+      final stats = container.read(sessionControllerProvider('abc')).turnStats;
       expect(
-          container.read(sessionControllerProvider('abc')).streamReconnects,
-          greaterThanOrEqualTo(1),
-          reason: 'a dropped live socket counts as one reconnect');
+        stats!.tokensPerSec,
+        isNull,
+        reason: 'a 200ms window is not a measurable rate',
+      );
     });
 
     test('the plan derives from the /state poll', () async {
@@ -837,15 +1158,19 @@ void main() {
       final hub = SocketHub();
       final container = makeContainer(gateway: gateway, hub: hub);
       final sub = container.listen(
-          sessionControllerProvider('abc'), (previous, next) {});
+        sessionControllerProvider('abc'),
+        (previous, next) {},
+      );
       addTearDown(sub.close);
       await pumpEventQueue();
       await pumpEventQueue();
 
       final s = container.read(sessionControllerProvider('abc'));
       expect(s.planPhases, hasLength(1));
-      expect(s.planPhases[0].tasks.map((t) => t.status).toList(),
-          ['completed', 'blocked']);
+      expect(s.planPhases[0].tasks.map((t) => t.status).toList(), [
+        'completed',
+        'blocked',
+      ]);
     });
   });
 }

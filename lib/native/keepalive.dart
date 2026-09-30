@@ -289,16 +289,22 @@ class KeepaliveCoordinator {
     }
   }
 
-  /// The app went to the background (AppLifecycleListener.onPause).
+  /// The app is leaving the screen (AppLifecycleListener.onHide, which
+  /// Android fires before the activity stops, so the process is still inside
+  /// the foreground grace window for service starts). Idempotent: onPause
+  /// fires right after onHide and must not restart anything.
+  ///
+  /// No permission round trip here: the start must be one direct call. A
+  /// foreground service runs without POST_NOTIFICATIONS on Android 13+ (the
+  /// notification just is not shown in the drawer); the dialog is asked in
+  /// the foreground by [update] instead. A refused start still falls back to
+  /// the plain pause.
   Future<void> appBackgrounded() async {
+    if (_backgrounded) return;
     _backgrounded = true;
     final s = _latest;
     if (s == null || !s.running) {
-      // Nothing to keep alive: today's behavior, pause the controller.
-      onPause();
-      return;
-    }
-    if (!await surface.ensureNotificationPermission()) {
+      // Nothing to keep alive: pause the controller.
       onPause();
       return;
     }
@@ -317,6 +323,15 @@ class KeepaliveCoordinator {
     if (!_backgrounded) {
       // Came back to the foreground while the start was in flight.
       await surface.stopRunning();
+      return;
+    }
+    if (_latest?.running != true) {
+      // The turn ended while the start was in flight; no further state
+      // update will arrive, so stop here or the service would leak. The
+      // service is marked active first: _stopService is a no-op while
+      // _serviceActive is false.
+      _serviceActive = true;
+      await _turnEnded();
       return;
     }
     _serviceActive = true;
@@ -386,7 +401,13 @@ class KeepaliveCoordinator {
 
   Future<void> _onTick() async {
     final s = _latest;
-    if (!_serviceActive || s == null || !s.running) return;
+    if (!_serviceActive) return;
+    if (s == null || !s.running) {
+      // The turn ended between updates: no agent_end-driven stop is coming,
+      // so the tick itself must retire the service.
+      await _turnEnded();
+      return;
+    }
     // Throttle to ~5s even if ticks pile up.
     final nowMs = now().millisecondsSinceEpoch;
     if (nowMs - _lastUpdateMs < 4500) return;

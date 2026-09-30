@@ -137,7 +137,8 @@ class _AssistantMessageState extends State<AssistantMessage> {
     final t = Theme.of(context).extension<OmpTokens>()!;
     final item = widget.item;
     final stopped = item.stopReason == 'aborted' && !item.streaming;
-    final visible = item.streaming ||
+    final visible =
+        item.streaming ||
         item.text.trim().isNotEmpty ||
         (item.error != null) ||
         stopped;
@@ -153,23 +154,38 @@ class _AssistantMessageState extends State<AssistantMessage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SelectionArea(
-            child: MarkdownBody(
-              data: _throttledText(),
-              selectable: false,
-              styleSheet: _sheetFor(context, t),
-              onTapLink: (text, href, title) {
-                // TODO(D2): open links in an in-app viewer. Deliberately a
-                // no-op so taps never crash before that lands.
-                widget.onLinkTap?.call(href ?? text);
-              },
-            ),
+          Builder(
+            builder: (scopeContext) {
+              final scope = MessageActionsScope.maybeOf(scopeContext);
+              return SelectionArea(
+                // Review #6: long-press selects text AND offers the actions in
+                // the selection toolbar (Inspect, Retry turn beside Copy).
+                contextMenuBuilder: (context, region) =>
+                    scope?.selectionMenu(context, region) ??
+                    AdaptiveTextSelectionToolbar.buttonItems(
+                      anchors: region.contextMenuAnchors,
+                      buttonItems: region.contextMenuButtonItems,
+                    ),
+                child: MarkdownBody(
+                  data: _throttledText(),
+                  selectable: false,
+                  styleSheet: _sheetFor(context, t),
+                  onTapLink: (text, href, title) {
+                    // TODO(D2): open links in an in-app viewer. Deliberately a
+                    // no-op so taps never crash before that lands.
+                    widget.onLinkTap?.call(href ?? text);
+                  },
+                ),
+              );
+            },
           ),
           if (stopped)
             Padding(
               padding: const EdgeInsets.only(top: OmpMetrics.s2),
-              child: Text('Stopped',
-                  style: TextStyle(color: t.ink3, fontSize: OmpMetrics.fsSm)),
+              child: Text(
+                'Stopped',
+                style: TextStyle(color: t.ink3, fontSize: OmpMetrics.fsSm),
+              ),
             ),
           if (item.error != null)
             Padding(
@@ -179,9 +195,10 @@ class _AssistantMessageState extends State<AssistantMessage> {
                   Icon(Icons.error_outline, size: 13, color: t.err),
                   const SizedBox(width: OmpMetrics.s1),
                   Flexible(
-                    child: Text(item.error!,
-                        style: TextStyle(
-                            color: t.err, fontSize: OmpMetrics.fsSm)),
+                    child: Text(
+                      item.error!,
+                      style: TextStyle(color: t.err, fontSize: OmpMetrics.fsSm),
+                    ),
                   ),
                 ],
               ),

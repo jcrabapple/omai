@@ -41,7 +41,9 @@ class UserBubble extends StatelessWidget {
 
     Widget bubble = Container(
       padding: const EdgeInsets.symmetric(
-          horizontal: OmpMetrics.s4, vertical: OmpMetrics.s2),
+        horizontal: OmpMetrics.s4,
+        vertical: OmpMetrics.s2,
+      ),
       decoration: BoxDecoration(
         color: t.surface,
         borderRadius: const BorderRadius.only(
@@ -57,11 +59,25 @@ class UserBubble extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (item.text.isNotEmpty)
-            SelectionArea(
-              child: Text(
-                item.text,
-                style: textTheme.bodyMedium?.copyWith(color: cs.onSurface),
-              ),
+            Builder(
+              builder: (scopeContext) {
+                // The scope is captured from a context BELOW it: the
+                // selection toolbar is built in the root overlay, outside
+                // this subtree (review #6).
+                final scope = MessageActionsScope.maybeOf(scopeContext);
+                return SelectionArea(
+                  contextMenuBuilder: (context, region) =>
+                      scope?.selectionMenu(context, region) ??
+                      AdaptiveTextSelectionToolbar.buttonItems(
+                        anchors: region.contextMenuAnchors,
+                        buttonItems: region.contextMenuButtonItems,
+                      ),
+                  child: Text(
+                    item.text,
+                    style: textTheme.bodyMedium?.copyWith(color: cs.onSurface),
+                  ),
+                );
+              },
             ),
           if (item.images > 0)
             Padding(
@@ -69,13 +85,11 @@ class UserBubble extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.image_outlined,
-                      size: 14, color: t.ink3),
+                  Icon(Icons.image_outlined, size: 14, color: t.ink3),
                   const SizedBox(width: OmpMetrics.s1),
                   Text(
                     '${item.images} ${item.images == 1 ? 'image' : 'images'}',
-                    style: TextStyle(
-                        color: t.ink3, fontSize: OmpMetrics.fsSm),
+                    style: TextStyle(color: t.ink3, fontSize: OmpMetrics.fsSm),
                   ),
                 ],
               ),
@@ -115,8 +129,7 @@ class UserBubble extends StatelessWidget {
             ),
             if (item.failed == true) ...[
               _Note(
-                text:
-                    'Not sent${item.error != null ? ': ${item.error}' : ''}',
+                text: 'Not sent${item.error != null ? ': ${item.error}' : ''}',
                 color: t.err,
                 stale: item.stale == true,
               ),
@@ -124,8 +137,10 @@ class UserBubble extends StatelessWidget {
                 TextButton.icon(
                   onPressed: retrying ? null : () => onRetry!(item),
                   icon: Icon(Icons.refresh, size: 16, color: t.err),
-                  label: Text('Retry',
-                      style: TextStyle(color: t.err, fontSize: OmpMetrics.fsSm)),
+                  label: Text(
+                    'Retry',
+                    style: TextStyle(color: t.err, fontSize: OmpMetrics.fsSm),
+                  ),
                 ),
             ] else if (item.pending && item.note == 'steer-pending')
               const _Note(text: 'pending')

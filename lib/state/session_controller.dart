@@ -84,7 +84,8 @@ class TurnStats {
       other.lastEventSeq == lastEventSeq;
 
   @override
-  int get hashCode => Object.hash(ttftMs, tokensPerSec, reconnects, lastEventSeq);
+  int get hashCode =>
+      Object.hash(ttftMs, tokensPerSec, reconnects, lastEventSeq);
 }
 
 /// Everything the session screen renders, one immutable snapshot.
@@ -95,8 +96,10 @@ class SessionState {
     this.error,
     this.info,
     TranscriptState? transcript,
-    this.connection =
-        const StreamStatus(state: StreamState.offline, retryAt: null),
+    this.connection = const StreamStatus(
+      state: StreamState.offline,
+      retryAt: null,
+    ),
     this.wsError,
     this.stats,
     this.commands = const [],
@@ -248,8 +251,8 @@ final sessionEnvProvider = FutureProvider<SessionEnv>((ref) async {
   );
 });
 
-final sessionControllerProvider = NotifierProvider.autoDispose.family<
-    SessionController, SessionState, String>(SessionController.new);
+final sessionControllerProvider = NotifierProvider.autoDispose
+    .family<SessionController, SessionState, String>(SessionController.new);
 
 /// One open session, keyed by gateway session id. The id arrives through the
 /// constructor (Riverpod 3 family without codegen); `build` kicks off the
@@ -272,8 +275,18 @@ class SessionController extends Notifier<SessionState> {
   int? _turnStartMs;
   int? _ttftMs;
 
+  /// Client-clock ms of the first assistant delta and of agent_end: the
+  /// tokens-per-second duration is measured between exactly these two client
+  /// readings, never mixed with server timestamps (review #11).
+  int? _firstDeltaMs;
+  int? _turnEndMs;
+
   /// The last stream state we saw, for counting reconnects.
   StreamState? _lastStreamState;
+
+  /// Set while the socket is down because WE paused it (voluntary app
+  /// backgrounding); such drops must not count as reconnects (review #13).
+  bool _pausedByUs = false;
 
   @override
   SessionState build() {
@@ -293,7 +306,9 @@ class SessionController extends Notifier<SessionState> {
       if (gen != _generation || !ref.mounted) return;
       state = state.copyWith(
         phase: SessionPhase.error,
-        error: e is GatewayClientError ? e.message : 'Could not open the session',
+        error: e is GatewayClientError
+            ? e.message
+            : 'Could not open the session',
       );
       return;
     }
@@ -316,8 +331,7 @@ class SessionController extends Notifier<SessionState> {
       }
       if (e is AuthError) {
         // A confirmed 401 signs the user out.
-        unawaited(
-            ref.read(connectionNotifierProvider.notifier).signOut());
+        unawaited(ref.read(connectionNotifierProvider.notifier).signOut());
       }
       state = state.copyWith(
         phase: SessionPhase.error,
@@ -330,7 +344,9 @@ class SessionController extends Notifier<SessionState> {
 
   /// (info, messages) fetched in that order; see the module header.
   Future<(SessionInfo, List<Map<String, Object?>>)> _snapshot(
-      SessionEnv env, String gwId) async {
+    SessionEnv env,
+    String gwId,
+  ) async {
     final info = await env.client.sessionInfo(gwId);
     final raw = await env.client.messages(gwId);
     return (info, rawMapList(raw['messages']));
@@ -366,13 +382,15 @@ class SessionController extends Notifier<SessionState> {
         onSignedOut: () {
           if (!ref.mounted) return;
           // Close code 4401: the token was rejected. Sign out.
-          unawaited(
-              ref.read(connectionNotifierProvider.notifier).signOut());
+          unawaited(ref.read(connectionNotifierProvider.notifier).signOut());
         },
         onGone: () {
           if (gen != _generation || !ref.mounted) return;
           state = state.copyWith(
-              phase: SessionPhase.gone, clearError: true, clearActivity: true);
+            phase: SessionPhase.gone,
+            clearError: true,
+            clearActivity: true,
+          );
           ref.read(sessionsStoreProvider.notifier).remove(gwId);
         },
       ),
@@ -382,14 +400,19 @@ class SessionController extends Notifier<SessionState> {
   }
 
   /// Connection status: paint it, and count a reconnect each time a live
-  /// socket drops (live -> connecting/retrying/offline).
+  /// socket drops unexpectedly. A voluntary pause (the app backgrounded
+  /// without a running turn) is not a reconnect (review #13).
   void _onStreamState(StreamStatus status) {
     final was = _lastStreamState;
     _lastStreamState = status.state;
+    final voluntary = _pausedByUs && status.state != StreamState.live;
+    if (status.state == StreamState.live) _pausedByUs = false;
     if (was == StreamState.live && status.state != StreamState.live) {
       state = state.copyWith(
         connection: status,
-        streamReconnects: state.streamReconnects + 1,
+        streamReconnects: voluntary
+            ? state.streamReconnects
+            : state.streamReconnects + 1,
       );
       return;
     }
@@ -401,8 +424,7 @@ class SessionController extends Notifier<SessionState> {
     if (type == 'auth_ok') {
       final session = frame['session'];
       if (session is Map) {
-        final info =
-            SessionInfo.fromJson(Map<String, dynamic>.from(session));
+        final info = SessionInfo.fromJson(Map<String, dynamic>.from(session));
         _setInfo(info);
         _dispatch(PendingUiInput(_uiRequests(info.pendingUi)));
       }
@@ -445,6 +467,7 @@ class SessionController extends Notifier<SessionState> {
         event.type == 'message_update' &&
         _isAssistantDelta(event)) {
       _ttftMs = _now() - _turnStartMs!;
+      _firstDeltaMs = _now();
     }
     final key = _coalesceKey(event);
     if (key != null) {
@@ -496,6 +519,8 @@ class SessionController extends Notifier<SessionState> {
       case 'agent_start':
         _turnStartMs = _now();
         _ttftMs = null;
+        _firstDeltaMs = null;
+        _turnEndMs = null;
         state = state.copyWith(
           activity: ActivitySummary(
             toolName: state.activity?.toolName ?? '',
@@ -505,6 +530,7 @@ class SessionController extends Notifier<SessionState> {
       case 'agent_end':
         // The turn is over: the activity line goes, stats refresh. The
         // reducer has already cleared `running`.
+        _turnEndMs = _now();
         state = state.copyWith(
           clearActivity: true,
           turnStats: _turnStatsForLastTurn(),
@@ -517,7 +543,7 @@ class SessionController extends Notifier<SessionState> {
             toolName: name,
             turnStartedAt:
                 state.activity?.turnStartedAt ??
-                    DateTime.now().millisecondsSinceEpoch,
+                DateTime.now().millisecondsSinceEpoch,
           ),
         );
       case 'available_commands_update':
@@ -565,7 +591,9 @@ class SessionController extends Notifier<SessionState> {
 
   /// Timing of the turn that just ended: TTFT as timed from agent_start to
   /// the first assistant delta, tokens per second from the last assistant
-  /// message's usage and stream duration when both are present.
+  /// message's output tokens over the client-clock stream duration (first
+  /// delta to turn end). Client clock only: server timestamps are a
+  /// different clock and produced wildly skewed figures (review #11).
   TurnStats _turnStatsForLastTurn() {
     AssistantItem? last;
     for (final it in state.transcript.items) {
@@ -574,14 +602,12 @@ class SessionController extends Notifier<SessionState> {
     int? ttft = _ttftMs ?? last?.ttft;
     double? tokensPerSec;
     final output = last?.usage?['output'];
-    if (output is num && output > 0) {
-      var durationMs = last?.duration;
-      if ((durationMs == null || durationMs <= 0) &&
-          _turnStartMs != null &&
-          last?.timestamp != null) {
-        durationMs = last!.timestamp! - _turnStartMs!;
-      }
-      if (durationMs != null && durationMs > 0) {
+    final firstDelta = _firstDeltaMs;
+    final end = _turnEndMs;
+    if (output is num && output > 0 && firstDelta != null && end != null) {
+      final durationMs = end - firstDelta;
+      // Shorter than 500ms of streaming is not a measurable rate.
+      if (durationMs >= 500) {
         tokensPerSec = output.toDouble() * 1000 / durationMs;
       }
     }
@@ -596,8 +622,7 @@ class SessionController extends Notifier<SessionState> {
 
   // ------------------------------------------------------- info refreshers
 
-  Future<void> _refreshInfo(
-      SessionEnv env, String gwId, int gen) async {
+  Future<void> _refreshInfo(SessionEnv env, String gwId, int gen) async {
     try {
       final info = await env.client.sessionInfo(gwId);
       if (gen != _generation || !ref.mounted) return;
@@ -607,21 +632,21 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
-  Future<void> _refreshStats(
-      SessionEnv env, String gwId, int gen) async {
+  Future<void> _refreshStats(SessionEnv env, String gwId, int gen) async {
     try {
       final s = await env.client.stats(gwId);
       if (gen != _generation || !ref.mounted) return;
-      state = state.copyWith(stats: s['data'] is Map
-          ? Map<String, Object?>.from(s['data'] as Map)
-          : s);
+      state = state.copyWith(
+        stats: s['data'] is Map
+            ? Map<String, Object?>.from(s['data'] as Map)
+            : s,
+      );
     } catch (_) {
       // stats are optional
     }
   }
 
-  Future<void> _refreshQueued(
-      SessionEnv env, String gwId, int gen) async {
+  Future<void> _refreshQueued(SessionEnv env, String gwId, int gen) async {
     try {
       final st = await env.client.state(gwId);
       if (gen != _generation || !ref.mounted) return;
@@ -639,8 +664,7 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
-  Future<void> _loadCommands(
-      SessionEnv env, String gwId, int gen) async {
+  Future<void> _loadCommands(SessionEnv env, String gwId, int gen) async {
     try {
       final r = await env.client.commands(gwId);
       if (gen != _generation || !ref.mounted) return;
@@ -689,6 +713,8 @@ class SessionController extends Notifier<SessionState> {
   void pause() {
     _statsTimer?.cancel();
     _statsTimer = null;
+    // Marked before the stream reports the drop so _onStreamState sees it.
+    _pausedByUs = true;
     _stream?.pause();
   }
 
@@ -731,22 +757,35 @@ class SessionController extends Notifier<SessionState> {
   /// the request goes out. Durable at the composer level: on failure the
   /// bubble turns into a failed one (Retry affordance) and the composer puts
   /// the text back. The review pin clears only after the gateway accepts.
-  Future<bool> send(String text,
-      {String mode = 'prompt',
-      List<Map<String, String>>? images,
-      String? retryLocalId}) async {
+  Future<bool> send(
+    String text, {
+    String mode = 'prompt',
+    List<Map<String, String>>? images,
+    String? retryLocalId,
+  }) async {
     final localId = retryLocalId ?? 'local-${++_localCounter}';
     if (ref.mounted) state = state.copyWith(clearWsError: true);
     if (retryLocalId != null) {
       // Retry: the SAME failed bubble flips back to pending; no second one.
       _dispatch(LocalSendRetryInput(localId));
     } else {
-      _dispatch(LocalSendInput(
-          localId: localId, text: text, mode: mode, images: images));
+      _dispatch(
+        LocalSendInput(
+          localId: localId,
+          text: text,
+          mode: mode,
+          images: images,
+        ),
+      );
     }
     try {
       final env = await ref.read(sessionEnvProvider.future);
-      final info = await env.client.prompt(gwId, text, mode: mode, images: images);
+      final info = await env.client.prompt(
+        gwId,
+        text,
+        mode: mode,
+        images: images,
+      );
       if (!ref.mounted) return true; // sent; nothing left to paint
       _setInfo(info);
       if (mode != 'prompt') {
@@ -758,10 +797,12 @@ class SessionController extends Notifier<SessionState> {
       return true;
     } catch (e) {
       if (!ref.mounted) return false;
-      _dispatch(LocalSendFailedInput(
+      _dispatch(
+        LocalSendFailedInput(
           localId: localId,
-          error:
-              e is GatewayClientError ? e.message : 'Send failed'));
+          error: e is GatewayClientError ? e.message : 'Send failed',
+        ),
+      );
       return false;
     }
   }
@@ -806,8 +847,9 @@ class SessionController extends Notifier<SessionState> {
   /// Remove a dialog locally, e.g. after answering it or after someone else
   /// beat us to it (409).
   void dropUi(String requestId) {
-    _dispatch(PendingUiInput(
-        state.pendingUi.where((u) => u.id != requestId).toList()));
+    _dispatch(
+      PendingUiInput(state.pendingUi.where((u) => u.id != requestId).toList()),
+    );
   }
 
   /// Stop the current turn.
@@ -868,14 +910,16 @@ class SessionController extends Notifier<SessionState> {
 /// TranscriptState with running forced to [value]; the only mutation the
 /// controller makes outside the reducer (the never-stick rule).
 TranscriptState _withRunning(TranscriptState t, bool value) => TranscriptState(
-      items: t.items,
-      pendingUi: t.pendingUi,
-      running: value,
-      counter: t.counter,
-    );
+  items: t.items,
+  pendingUi: t.pendingUi,
+  running: value,
+  counter: t.counter,
+);
 
-List<UiRequest> _uiRequests(List<Map<String, Object?>> raw) =>
-    [for (final r in raw) if (UiRequest.from(r) != null) UiRequest.from(r)!];
+List<UiRequest> _uiRequests(List<Map<String, Object?>> raw) => [
+  for (final r in raw)
+    if (UiRequest.from(r) != null) UiRequest.from(r)!,
+];
 
 String? _coalesceKey(OmpEvent event) {
   switch (event.type) {

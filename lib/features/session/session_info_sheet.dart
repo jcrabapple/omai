@@ -5,6 +5,7 @@
 // web/src/components/SessionInfoSheet.svelte (the queue/protocol section
 // stays web-side: it reads a dashboard-only /state shape).
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../format.dart';
@@ -56,153 +57,180 @@ class SessionInfoSheet extends ConsumerWidget {
         ),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(OmpMetrics.s4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Session info',
-                style: TextStyle(
-                  color: tokens.ink,
-                  fontSize: OmpMetrics.fsLg,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              if (info == null) ...[
-                const SizedBox(height: OmpMetrics.s3),
+          // Selectable so paths and ids can also be selection-copied longhand
+          // (review #12); the copy buttons above are the one-tap path.
+          child: SelectionArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  'No session is open.',
+                  'Session info',
                   style: TextStyle(
-                    color: tokens.ink3,
-                    fontSize: OmpMetrics.fsSm,
+                    color: tokens.ink,
+                    fontSize: OmpMetrics.fsLg,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ] else ...[
-                const SizedBox(height: OmpMetrics.s3),
-                _section(context, 'Where', [
-                  _row('Folder', info.cwd, tokens),
-                  _row('Session', info.gwId, tokens),
-                  if (info.ompSessionFile != null)
-                    _row('Session file', info.ompSessionFile!, tokens),
-                ]),
-                _section(context, 'Model', [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 96,
-                        child: Text(
-                          'Model',
-                          style: TextStyle(
-                            color: tokens.ink3,
-                            fontSize: OmpMetrics.fsSm,
-                          ),
-                        ),
+                if (info == null) ...[
+                  const SizedBox(height: OmpMetrics.s3),
+                  Text(
+                    'No session is open.',
+                    style: TextStyle(
+                      color: tokens.ink3,
+                      fontSize: OmpMetrics.fsSm,
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: OmpMetrics.s3),
+                  _section(context, 'Where', [
+                    _row(
+                      context,
+                      'Folder',
+                      info.cwd,
+                      tokens,
+                      copyLabel: 'Copy folder path',
+                    ),
+                    _row(
+                      context,
+                      'Session',
+                      info.gwId,
+                      tokens,
+                      copyLabel: 'Copy session id',
+                    ),
+                    if (info.ompSessionFile != null)
+                      _row(
+                        context,
+                        'Session file',
+                        info.ompSessionFile!,
+                        tokens,
+                        copyLabel: 'Copy session file path',
                       ),
-                      Expanded(
-                        child: Text(
-                          model == null ? 'Not set' : model.displayName,
-                          style: TextStyle(
-                            color: tokens.ink,
-                            fontSize: OmpMetrics.fsSm,
-                          ),
-                        ),
-                      ),
-                      Semantics(
-                        label: 'Switch model',
-                        button: true,
-                        child: TextButton(
-                          onPressed: () => _switchModel(context, ref),
+                  ]),
+                  _section(context, 'Model', [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 96,
                           child: Text(
-                            'Change',
+                            'Model',
                             style: TextStyle(
-                              color: tokens.accent,
+                              color: tokens.ink3,
                               fontSize: OmpMetrics.fsSm,
                             ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: OmpMetrics.s2,
-                    ),
-                    child: Wrap(
-                      spacing: OmpMetrics.s2,
-                      runSpacing: OmpMetrics.s2,
-                      children: [
-                        for (final level in thinkingLevels)
-                          _thinkingChip(
-                            context,
-                            ref,
-                            level,
-                            info.thinkingLevel ?? 'off',
+                        Expanded(
+                          child: Text(
+                            model == null ? 'Not set' : model.displayName,
+                            style: TextStyle(
+                              color: tokens.ink,
+                              fontSize: OmpMetrics.fsSm,
+                            ),
                           ),
+                        ),
+                        Semantics(
+                          label: 'Switch model',
+                          button: true,
+                          child: TextButton(
+                            onPressed: () => _switchModel(context, ref),
+                            child: Text(
+                              'Change',
+                              style: TextStyle(
+                                color: tokens.accent,
+                                fontSize: OmpMetrics.fsSm,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: OmpMetrics.s2,
+                      ),
+                      child: Wrap(
+                        spacing: OmpMetrics.s2,
+                        runSpacing: OmpMetrics.s2,
+                        children: [
+                          for (final level in thinkingLevels)
+                            _thinkingChip(
+                              context,
+                              ref,
+                              level,
+                              info.thinkingLevel ?? 'off',
+                            ),
+                        ],
+                      ),
+                    ),
+                    _row(
+                      context,
+                      'Context',
+                      usage == null
+                          ? 'Not reported yet'
+                          : '${usage.tokens != null ? "${compactNumber(usage.tokens!)} of " : ""}'
+                                '${compactNumber(usage.contextWindow)} tokens',
+                      tokens,
+                    ),
+                  ]),
+                  _section(context, 'Usage', [
+                    _row(context, 'Cost', cost ?? '\$0.00', tokens),
+                    _row(context, 'Messages', '${info.messageCount}', tokens),
+                  ]),
+                  Theme(
+                    data: Theme.of(context)
+                        .copyWith(dividerColor: const Color(0x00000000)),
+                    child: ExpansionTile(
+                      key: const ValueKey('stats-nerds'),
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: const EdgeInsets.only(
+                        bottom: OmpMetrics.s2,
+                      ),
+                      iconColor: tokens.ink3,
+                      collapsedIconColor: tokens.ink3,
+                      title: Text(
+                        'Stats for nerds',
+                        style: TextStyle(
+                          color: tokens.ink2,
+                          fontSize: OmpMetrics.fsSm,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      children: [
+                        _row(
+                          context,
+                          'Time to first token',
+                          turnStats?.ttftMs == null
+                              ? 'No turn yet'
+                              : duration(turnStats!.ttftMs),
+                          tokens,
+                        ),
+                        _row(
+                          context,
+                          'Tokens per second',
+                          turnStats?.tokensPerSec == null
+                              ? 'Not reported'
+                              : '${turnStats!.tokensPerSec!.toStringAsFixed(1)} tok/s',
+                          tokens,
+                        ),
+                        _row(
+                          context,
+                          'Stream reconnects',
+                          '${turnStats?.reconnects ?? state.streamReconnects}',
+                          tokens,
+                        ),
+                        _row(
+                          context,
+                          'Last event seq',
+                          '${turnStats?.lastEventSeq ?? info.lastEventSeq}',
+                          tokens,
+                        ),
                       ],
                     ),
                   ),
-                  _row(
-                    'Context',
-                    usage == null
-                        ? 'Not reported yet'
-                        : '${usage.tokens != null ? "${compactNumber(usage.tokens!)} of " : ""}'
-                              '${compactNumber(usage.contextWindow)} tokens',
-                    tokens,
-                  ),
-                ]),
-                _section(context, 'Usage', [
-                  _row('Cost', cost ?? '\$0.00', tokens),
-                  _row('Messages', '${info.messageCount}', tokens),
-                ]),
-                Theme(
-                  data: Theme.of(context)
-                      .copyWith(dividerColor: const Color(0x00000000)),
-                  child: ExpansionTile(
-                    key: const ValueKey('stats-nerds'),
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: const EdgeInsets.only(
-                      bottom: OmpMetrics.s2,
-                    ),
-                    iconColor: tokens.ink3,
-                    collapsedIconColor: tokens.ink3,
-                    title: Text(
-                      'Stats for nerds',
-                      style: TextStyle(
-                        color: tokens.ink2,
-                        fontSize: OmpMetrics.fsSm,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    children: [
-                      _row(
-                        'Time to first token',
-                        turnStats?.ttftMs == null
-                            ? 'No turn yet'
-                            : duration(turnStats!.ttftMs),
-                        tokens,
-                      ),
-                      _row(
-                        'Tokens per second',
-                        turnStats?.tokensPerSec == null
-                            ? 'Not reported'
-                            : '${turnStats!.tokensPerSec!.toStringAsFixed(1)} tok/s',
-                        tokens,
-                      ),
-                      _row(
-                        'Stream reconnects',
-                        '${turnStats?.reconnects ?? state.streamReconnects}',
-                        tokens,
-                      ),
-                      _row(
-                        'Last event seq',
-                        '${turnStats?.lastEventSeq ?? info.lastEventSeq}',
-                        tokens,
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -308,7 +336,13 @@ class SessionInfoSheet extends ConsumerWidget {
     );
   }
 
-  Widget _row(String label, String value, OmpTokens t) {
+  Widget _row(
+    BuildContext context,
+    String label,
+    String value,
+    OmpTokens t, {
+    String? copyLabel,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: OmpMetrics.s1),
       child: Row(
@@ -327,6 +361,26 @@ class SessionInfoSheet extends ConsumerWidget {
               style: TextStyle(color: t.ink, fontSize: OmpMetrics.fsSm),
             ),
           ),
+          if (copyLabel != null)
+            IconButton(
+              tooltip: copyLabel,
+              icon: Icon(Icons.copy, size: 18, color: t.ink3),
+              // 48dp target; the button hugs the row without growing it.
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: OmpMetrics.hit,
+                minHeight: OmpMetrics.hit,
+              ),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: value));
+                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                  const SnackBar(
+                    content: Text('Copied'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );

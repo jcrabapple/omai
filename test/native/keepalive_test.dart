@@ -1,6 +1,8 @@
 // Task F keep-alive policy: the coordinator state machine with a fake
 // notification surface, plus the pure notification/approval builders.
 
+import 'dart:async';
+
 import 'package:ohmypi/composer/approval.dart';
 import 'package:ohmypi/native/keepalive.dart';
 import 'package:ohmypi/wire/wire.dart';
@@ -19,6 +21,10 @@ class FakeSurface implements KeepaliveSurface {
 
   /// False simulates Android refusing the foreground-service start.
   bool startAllowed;
+
+  /// When set, showRunning blocks until completed: races with turn-end
+  /// updates during the in-flight start are testable this way.
+  Completer<void>? showRunningGate;
   final List<RecordedCall> calls = [];
 
   List<RecordedCall> get running =>
@@ -56,6 +62,8 @@ class FakeSurface implements KeepaliveSurface {
         'text': runningNotificationText(tool, startedAt, now()),
       }),
     );
+    final gate = showRunningGate;
+    if (gate != null) await gate.future;
     return startAllowed;
   }
 
@@ -232,15 +240,17 @@ void main() {
       expect(updates, hasLength(1));
     });
 
-    test('permission is asked once, in the foreground, when a turn first runs',
-        () async {
-      final h = Harness();
-      h.coordinator.update(snapshot(running: false));
-      expect(h.surface.count('permission'), 0);
-      h.coordinator.update(snapshot(running: true));
-      h.coordinator.update(snapshot(running: true, tool: 'bash'));
-      expect(h.surface.count('permission'), 1);
-    });
+    test(
+      'permission is asked once, in the foreground, when a turn first runs',
+      () async {
+        final h = Harness();
+        h.coordinator.update(snapshot(running: false));
+        expect(h.surface.count('permission'), 0);
+        h.coordinator.update(snapshot(running: true));
+        h.coordinator.update(snapshot(running: true, tool: 'bash'));
+        expect(h.surface.count('permission'), 1);
+      },
+    );
 
     test(
       'Android refusing the service start falls back to the pause',
@@ -284,17 +294,62 @@ void main() {
       },
     );
 
+    test('review #2: the background start is one direct call, never gated on '
+        'the notification permission', () async {
+      // Even with POST_NOTIFICATIONS refused: a foreground service runs
+      // without it (the notification just stays out of the drawer).
+      final h = Harness(permission: false);
+      h.coordinator.update(snapshot(running: true, tool: 'bash'));
+      // The foreground ask (retained) fires once, when the turn first runs.
+      expect(h.surface.count('permission'), 1);
+      await h.coordinator.appBackgrounded();
+      expect(
+        h.surface.count('permission'),
+        1,
+        reason: 'the background start adds no permission round trip',
+      );
+      expect(h.surface.count('showRunning'), 1);
+      expect(h.coordinator.serviceActive, isTrue);
+      expect(h.pauses, isEmpty);
+    });
+
     test(
-      'permission denied falls back to the plain background pause',
+      'backgrounding is idempotent: onHide then onPause start once',
       () async {
-        final h = Harness(permission: false);
-        h.coordinator.update(snapshot(running: true));
+        final h = Harness();
+        h.coordinator.update(snapshot(running: true, tool: 'bash'));
         await h.coordinator.appBackgrounded();
-        expect(h.coordinator.serviceActive, isFalse);
-        expect(h.surface.running, isEmpty);
-        expect(h.pauses, hasLength(1));
+        await h.coordinator.appBackgrounded();
+        expect(h.surface.count('showRunning'), 1);
+        expect(h.coordinator.serviceActive, isTrue);
       },
     );
+
+    test('review #4: a turn that ends while showRunning is in flight stops the '
+        'service once the start lands, instead of leaking it', () async {
+      final h = Harness();
+      h.surface.showRunningGate = Completer<void>();
+      h.coordinator.update(snapshot(running: true, tool: 'bash'));
+      final starting = h.coordinator.appBackgrounded();
+      // The turn ends while the start is in flight: the service is not
+      // active yet, so update() returns early and nothing else will stop
+      // the service.
+      h.coordinator.update(snapshot(running: false));
+      h.surface.showRunningGate!.complete();
+      await starting;
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        h.surface.count('stopRunning'),
+        1,
+        reason: 'the in-flight start must finish into a stop, not a leak',
+      );
+      expect(h.coordinator.serviceActive, isFalse);
+      expect(
+        h.pauses,
+        hasLength(1),
+        reason: 'backgrounded turn end pauses like any other',
+      );
+    });
 
     test('foreground updates clear the service', () async {
       final h = Harness();

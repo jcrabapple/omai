@@ -26,10 +26,10 @@ import 'package:ohmypi/theme/tokens.dart';
 import '../../stream/fakes.dart';
 
 http.Response _json(Object? body, {int status = 200}) => http.Response(
-      jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 class _FixedTokenStore implements TokenStore {
   @override
@@ -74,50 +74,57 @@ class FakeGateway {
   final Map<String, Object?> bodies = {};
 
   http.Client client() => MockClient((req) async {
-        if (req.body.isNotEmpty) {
-          final decoded = jsonDecode(req.body);
-          if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
-        }
-        if (req.url.path.endsWith('/messages')) {
-          return _json({'messages': []});
-        }
-        if (req.url.path.endsWith('/state')) {
-          return _json(stateBody);
-        }
-        if (req.url.path.endsWith('/stats')) {
-          return _json({
-            'data': {
-              'cost': 0.42,
-              'contextUsage': {'percent': 12.5, 'tokens': 20000, 'contextWindow': 160000},
-            },
-          });
-        }
-        if (req.url.path.endsWith('/catalog/models')) {
-          return _json({
-            'models': [
-              {
-                'provider': 'z-ai',
-                'id': 'other-model',
-                'selector': 'z-ai/other-model',
-                'name': 'Other Model',
-                'contextWindow': 32000,
-                'maxTokens': 8192,
-                'reasoning': false,
-                'thinking': null,
-                'input': [],
-                'cost': {'input': 0, 'output': 0},
-              },
-            ],
-          });
-        }
-        if (req.url.path.endsWith('/commands')) {
-          return _json({'data': {'commands': []}});
-        }
-        return _json(info);
+    if (req.body.isNotEmpty) {
+      final decoded = jsonDecode(req.body);
+      if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
+    }
+    if (req.url.path.endsWith('/messages')) {
+      return _json({'messages': []});
+    }
+    if (req.url.path.endsWith('/state')) {
+      return _json(stateBody);
+    }
+    if (req.url.path.endsWith('/stats')) {
+      return _json({
+        'data': {
+          'cost': 0.42,
+          'contextUsage': {
+            'percent': 12.5,
+            'tokens': 20000,
+            'contextWindow': 160000,
+          },
+        },
       });
+    }
+    if (req.url.path.endsWith('/catalog/models')) {
+      return _json({
+        'models': [
+          {
+            'provider': 'z-ai',
+            'id': 'other-model',
+            'selector': 'z-ai/other-model',
+            'name': 'Other Model',
+            'contextWindow': 32000,
+            'maxTokens': 8192,
+            'reasoning': false,
+            'thinking': null,
+            'input': [],
+            'cost': {'input': 0, 'output': 0},
+          },
+        ],
+      });
+    }
+    if (req.url.path.endsWith('/commands')) {
+      return _json({
+        'data': {'commands': []},
+      });
+    }
+    return _json(info);
+  });
 }
 
 ProviderContainer _container({
+  DateTime Function()? now,
   required FakeGateway gateway,
   required SocketHub hub,
 }) {
@@ -131,28 +138,42 @@ ProviderContainer _container({
     token: 'tok',
     socketFactory: hub.factory,
     scheduler: const SystemScheduler(),
+    now: now ?? DateTime.now,
   );
-  final container = ProviderContainer(overrides: [
-    // A fixed catalog so the picker needs no gateway round-trip.
-    modelsStoreProvider.overrideWith(() => _SeededModelsStore([CatalogModel(
-          provider: 'z-ai',
-          id: 'other-model',
-          selector: 'z-ai/other-model',
-          name: 'Other Model',
-          contextWindow: 32000,
-          maxTokens: 8192,
-          reasoning: false,
-          thinking: null,
-          input: const [],
-          cost: const ModelCost(input: 0, output: 0, cacheRead: 0, cacheWrite: 0),
-        )])),
-    connectionPrefsProvider.overrideWithValue(
-      MemoryPrefs(const [ConnectionRecord(id: 'c1', url: 'https://g', label: 'G')]),
-    ),
-    tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
-    reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
-    sessionEnvProvider.overrideWith((ref) async => env),
-  ]);
+  final container = ProviderContainer(
+    overrides: [
+      // A fixed catalog so the picker needs no gateway round-trip.
+      modelsStoreProvider.overrideWith(
+        () => _SeededModelsStore([
+          CatalogModel(
+            provider: 'z-ai',
+            id: 'other-model',
+            selector: 'z-ai/other-model',
+            name: 'Other Model',
+            contextWindow: 32000,
+            maxTokens: 8192,
+            reasoning: false,
+            thinking: null,
+            input: const [],
+            cost: const ModelCost(
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+            ),
+          ),
+        ]),
+      ),
+      connectionPrefsProvider.overrideWithValue(
+        MemoryPrefs(const [
+          ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
+        ]),
+      ),
+      tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
+      reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
+      sessionEnvProvider.overrideWith((ref) async => env),
+    ],
+  );
   container.read(connectionNotifierProvider.notifier).state = ConnectionState(
     connections: const [
       ConnectionRecord(id: 'c1', url: 'https://g', label: 'G'),
@@ -164,20 +185,19 @@ ProviderContainer _container({
 }
 
 Map<String, Object?> infoJson() => {
-      'gwId': 'abc',
-      'cwd': '/work/project-x',
-      'thinkingLevel': 'low',
-      'lastEventSeq': 0,
-      'isStreaming': false,
-      'model': {
-        'id': 'm1',
-        'name': 'Model One',
-        'provider': 'p',
-      },
-      'contextUsage': {'percent': 10, 'tokens': 16000, 'contextWindow': 160000},
-    };
+  'gwId': 'abc',
+  'cwd': '/work/project-x',
+  'thinkingLevel': 'low',
+  'lastEventSeq': 0,
+  'isStreaming': false,
+  'model': {'id': 'm1', 'name': 'Model One', 'provider': 'p'},
+  'contextUsage': {'percent': 10, 'tokens': 16000, 'contextWindow': 160000},
+};
 
-Future<void> _pumpSheet(WidgetTester tester, ProviderContainer container) async {
+Future<void> _pumpSheet(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -201,8 +221,9 @@ Future<void> _pumpSheet(WidgetTester tester, ProviderContainer container) async 
 }
 
 void main() {
-  testWidgets('shows where the open session runs and its model',
-      (tester) async {
+  testWidgets('shows where the open session runs and its model', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -211,17 +232,16 @@ void main() {
     await _pumpSheet(tester, container);
 
     final text = find.byType(Text);
-    String allText() => tester
-        .widgetList<Text>(text)
-        .map((t) => t.data ?? '')
-        .join('\n');
+    String allText() =>
+        tester.widgetList<Text>(text).map((t) => t.data ?? '').join('\n');
     expect(allText(), contains('/work/project-x'));
     expect(allText(), contains('Model One'));
     expect(allText(), contains('abc'));
   });
 
-  testWidgets('tapping a thinking chip calls setThinking with that level',
-      (tester) async {
+  testWidgets('tapping a thinking chip calls setThinking with that level', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -232,14 +252,12 @@ void main() {
     await tester.tap(find.text('medium'));
     await tester.pump();
     await tester.pump();
-    expect(
-      gateway.bodies['/api/sessions/abc/thinking'],
-      {'level': 'medium'},
-    );
+    expect(gateway.bodies['/api/sessions/abc/thinking'], {'level': 'medium'});
   });
 
-  testWidgets('Change opens the model picker and a pick calls setModel',
-      (tester) async {
+  testWidgets('Change opens the model picker and a pick calls setModel', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -257,10 +275,10 @@ void main() {
     await tester.pump();
     await tester.pump();
     await tester.pump();
-    expect(
-      gateway.bodies['/api/sessions/abc/model'],
-      {'provider': 'z-ai', 'modelId': 'other-model'},
-    );
+    expect(gateway.bodies['/api/sessions/abc/model'], {
+      'provider': 'z-ai',
+      'modelId': 'other-model',
+    });
   });
 
   testWidgets('Stats for nerds shows the last turn TTFT, tokens per second, '
@@ -270,13 +288,22 @@ void main() {
     addTearDown(tester.view.reset);
     final hub = SocketHub();
     final gateway = FakeGateway(info: infoJson());
-    final container = _container(gateway: gateway, hub: hub);
+    // A fake client clock: tokens per second is timed client-side only
+    // (review #11), so the harness drives the clock between events.
+    var ms = 1_700_000_000_000;
+    final container = _container(
+      gateway: gateway,
+      hub: hub,
+      now: () => DateTime.fromMillisecondsSinceEpoch(ms),
+    );
 
     // The sheet watches the controller, which opens the session and socket.
     await _pumpSheet(tester, container);
 
-    // Script a finished turn through the stream.
-    hub.current.frame(1, {'type': 'agent_start'});
+    // Script a finished turn through the stream. Frames deliver
+    // synchronously, so the clock is advanced BEFORE each frame.
+    hub.current.frame(1, {'type': 'agent_start'}); // clock t0
+    ms += 600; // first assistant delta
     hub.current.frame(2, {
       'type': 'message_update',
       'message': {
@@ -284,7 +311,7 @@ void main() {
         'content': [
           {'type': 'text', 'text': 'hello'},
         ],
-        'timestamp': 1700000001000,
+        'timestamp': 1700000001000, // server clock, ignored for timing
       },
     });
     hub.current.frame(3, {
@@ -300,6 +327,7 @@ void main() {
         'timestamp': 1700000001000,
       },
     });
+    ms += 5000; // turn end: 5.6s after start, 5s of streaming
     hub.current.frame(4, {'type': 'agent_end'});
     await tester.pump();
     await tester.pump();

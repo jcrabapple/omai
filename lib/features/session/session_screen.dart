@@ -62,9 +62,14 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
     _lifecycle = AppLifecycleListener(
       // Task F: backgrounding while the open session is running starts the
       // foreground service and keeps the socket; otherwise the controller
-      // pauses as before. The sessions LIST polling is owned by
-      // SessionsScreen alone — resuming here must not restart it, this
-      // screen gets its updates over the WebSocket.
+      // pauses as before. onHide fires before the activity stops, which
+      // keeps the service start inside Android's foreground grace window;
+      // the onPause call is an idempotent no-op after it. The sessions LIST
+      // polling is owned by SessionsScreen alone — resuming here must not
+      // restart it, this screen gets its updates over the WebSocket.
+      onHide: () {
+        _keepalive.appBackgrounded();
+      },
       onResume: () {
         _keepalive.appForegrounded();
         _readController()?.resume();
@@ -83,13 +88,13 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
   }
 
   KeepaliveSnapshot _keepaliveSnapshot(SessionState s) => KeepaliveSnapshot(
-        gwId: s.gwId,
-        sessionTitle: s.info?.title ?? s.gwId,
-        running: s.running,
-        tool: s.activity?.toolName,
-        turnStartedAt: s.activity?.turnStartedAt,
-        pendingUi: s.pendingUi,
-      );
+    gwId: s.gwId,
+    sessionTitle: s.info?.title ?? s.gwId,
+    running: s.running,
+    tool: s.activity?.toolName,
+    turnStartedAt: s.activity?.turnStartedAt,
+    pendingUi: s.pendingUi,
+  );
 
   /// The notifier, read at call time: a retry invalidates the provider and
   /// replaces the controller instance.
@@ -133,10 +138,14 @@ class _SessionScreenState extends ConsumerState<SessionScreen> {
           children: [
             // The plan ribbon sits under the header while the session has
             // todo phases; tapping opens the plan sheet.
-            if (state.phase == SessionPhase.ready && state.planPhases.isNotEmpty)
+            if (state.phase == SessionPhase.ready &&
+                state.planPhases.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                  OmpMetrics.s3, OmpMetrics.s2, OmpMetrics.s3, 0,
+                  OmpMetrics.s3,
+                  OmpMetrics.s2,
+                  OmpMetrics.s3,
+                  0,
                 ),
                 child: PlanRibbon(
                   phases: state.planPhases,

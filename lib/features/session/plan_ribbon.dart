@@ -44,6 +44,9 @@ class PlanRibbon extends StatelessWidget {
         child: InkWell(
           onTap: onOpen,
           child: Container(
+            // 48dp minimum hit target (review #10): the web ribbon reserves
+            // var(--hit) for exactly this reason.
+            constraints: const BoxConstraints(minHeight: OmpMetrics.hit),
             decoration: BoxDecoration(
               border: Border.all(color: tokens.line),
               borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
