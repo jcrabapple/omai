@@ -2,6 +2,7 @@
 // failure, hidden while a turn runs and after a retry is accepted, and the
 // tap POSTs /retry (never a '/retry' prompt). Ported from web
 // components/__tests__/Composer.test.ts chip cases.
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart' hide ConnectionState;
@@ -79,6 +80,16 @@ class RetryGateway {
 
   List<Object?> messages;
   int retryStatus;
+
+  /// When set, /retry requests are held until [completeRetry].
+  bool holdRetry = false;
+  Completer<http.Response>? _heldRetry;
+
+  void completeRetry() {
+    _heldRetry?.complete(_json({'ok': true}));
+    _heldRetry = null;
+  }
+
   final Map<String, Object?> bodies = {};
   final Set<String> visited = {};
 
@@ -89,6 +100,11 @@ class RetryGateway {
       if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
     }
     if (req.url.path.endsWith('/retry')) {
+      if (holdRetry) {
+        final held = Completer<http.Response>();
+        _heldRetry = held;
+        return held.future;
+      }
       return _json({'ok': true}, status: retryStatus);
     }
     if (req.url.path.endsWith('/messages')) {
@@ -301,5 +317,31 @@ void main() {
     await tester.pump();
 
     expect(find.text('Could not retry'), findsOneWidget);
+  });
+
+  testWidgets('popping the session while a retry is pending throws nothing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final hub = SocketHub();
+    final gateway = RetryGateway(messages: _failedTurn)..holdRetry = true;
+    final container = _container(gateway: gateway, hub: hub);
+    await _pumpReady(tester, container);
+
+    // The retry request is in flight when the user leaves the session.
+    await tester.tap(find.text('Retry turn'));
+    await tester.pump();
+    expect(gateway.visited.any((p) => p == '/api/sessions/abc/retry'), isTrue);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // The request completes AFTER the screen (and its controller) is gone.
+    gateway.completeRetry();
+    await tester.pump();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
   });
 }

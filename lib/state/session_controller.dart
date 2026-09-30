@@ -956,6 +956,17 @@ class SessionController extends Notifier<SessionState> {
     await env.client.abort(gwId);
   }
 
+  /// Retry the last failed backend TURN through the gateway (POST /retry).
+  /// On success the chip hides optimistically (LocalRetryInput) until omp
+  /// starts the new turn. Rethrows on failure so the caller can show an
+  /// error; the mounted/generation guards keep late completions inert.
+  Future<void> retryTurn() async {
+    final env = await ref.read(sessionEnvProvider.future);
+    await env.client.retry(gwId);
+    if (!ref.mounted) return;
+    _dispatch(const LocalRetryInput());
+  }
+
   Future<void> setModel(String provider, String modelId) async {
     final env = await ref.read(sessionEnvProvider.future);
     await env.client.setModel(gwId, provider, modelId);

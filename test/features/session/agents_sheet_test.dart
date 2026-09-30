@@ -331,10 +331,18 @@ void main() {
     // Running rows carry the status word in the semantic label.
     expect(
       find.byWidgetPredicate(
-        (w) => w is Semantics && w.properties.label == 'explore: Running',
+        (w) =>
+            w is Semantics &&
+            w.properties.label == 'explore, Running, map the surface',
       ),
       findsOneWidget,
     );
+    // One TalkBack stop: the row's inner texts are not separate stops.
+    expect(
+      find.bySemanticsLabel(RegExp('explore, Running, map the surface')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('map the surface'), findsNothing);
     semantics.dispose();
   });
 
@@ -483,6 +491,168 @@ void main() {
 
     expect(find.text('explore'), findsOneWidget);
     expect(find.text('fix'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a page opened before the id arrives follows the re-key', (
+    tester,
+  ) async {
+    final hub = SocketHub();
+    final gateway = FakeGateway()
+      ..transcriptPages = {
+        null: {
+          'messages': [_userMsg('m1', 'hello subagent')],
+          'nextByte': null,
+          'reset': false,
+        },
+      };
+    final container = _container(gateway: gateway, hub: hub);
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    // A progress frame WITHOUT an id: the roster row is keyed '#0'.
+    hub.current.frame(5, {
+      'type': 'subagent_progress',
+      'payload': {
+        'index': 0,
+        'progress': {
+          'index': 0,
+          'agent': 'explore',
+          'status': 'running',
+          'task': 'map the surface',
+        },
+      },
+    });
+    await tester.pump();
+    await tester.pump();
+
+    await _openViaMenu(tester);
+    final inkwell = find.descendant(
+      of: find.byKey(const ValueKey('agent-row-#0')),
+      matching: find.byType(InkWell),
+    );
+    await tester.tap(inkwell.first, warnIfMissed: false);
+    await _settle(tester);
+
+    // No id yet: the waiting state shows, no request went out.
+    expect(find.text('Waiting for the agent to start.'), findsOneWidget);
+    expect(gateway.transcriptRequests, isEmpty);
+
+    // omp assigns the id: the roster re-keys the row to 'sa9' and the page
+    // must start the first load for that id.
+    hub.current.frame(6, {
+      'type': 'subagent_progress',
+      'payload': {
+        'index': 0,
+        'progress': {
+          'id': 'sa9',
+          'index': 0,
+          'agent': 'explore',
+          'status': 'running',
+          'task': 'map the surface',
+        },
+      },
+    });
+    await _settle(tester);
+
+    expect(gateway.transcriptRequests, [null]);
+    expect(find.text('hello subagent'), findsOneWidget);
+  });
+
+  testWidgets('a reset page with a smaller nextByte keeps paging', (
+    tester,
+  ) async {
+    final hub = SocketHub();
+    final gateway = FakeGateway()
+      ..subagentsBody = {
+        'subagents': [
+          {
+            'id': 'sa1',
+            'index': 0,
+            'agent': 'explore',
+            'status': 'running',
+            'task': 'map the surface',
+          },
+        ],
+      }
+      ..transcriptPages = {
+        null: {
+          'messages': [_userMsg('m1', 'first page')],
+          'nextByte': 4096,
+          'reset': false,
+        },
+        '4096': {
+          'messages': [_assistantMsg('m2', 'rewound page')],
+          'nextByte': 150,
+          'reset': true,
+        },
+        '150': {
+          'messages': [_userMsg('m3', 'after rewind')],
+          'nextByte': null,
+          'reset': false,
+        },
+      };
+    final container = _container(gateway: gateway, hub: hub);
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    await _openViaMenu(tester);
+    await tester.tap(find.text('explore'), warnIfMissed: false);
+    await _settle(tester);
+    expect(gateway.transcriptRequests, [null]);
+
+    await tester.tap(find.byKey(const ValueKey('agents-load-more')));
+    await _settle(tester);
+
+    // The reset replaced the messages AND paging continues from 150.
+    expect(find.text('first page'), findsNothing);
+    expect(find.text('rewound page'), findsOneWidget);
+    expect(find.byKey(const ValueKey('agents-load-more')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('agents-load-more')));
+    await _settle(tester);
+    expect(gateway.transcriptRequests, [null, '4096', '150']);
+    expect(find.text('after rewind'), findsOneWidget);
+    expect(find.byKey(const ValueKey('agents-load-more')), findsNothing);
+  });
+
+  testWidgets('25 rows on a 360x640 sheet at 1.3 scale scroll, no overflow', (
+    tester,
+  ) async {
+    final hub = SocketHub();
+    final gateway = FakeGateway()
+      ..subagentsBody = {
+        'subagents': [
+          for (var i = 0; i < 25; i++)
+            {
+              'id': 'sa$i',
+              'index': i,
+              'agent': 'agent-$i',
+              'status': 'completed',
+              'task': 'task number $i to fill the row out a bit',
+            },
+        ],
+      };
+    final container = _container(gateway: gateway, hub: hub);
+    addTearDown(container.dispose);
+    await _pumpReady(
+      tester,
+      container,
+      textScaler: TextScaler.linear(1.3),
+      size: const Size(360, 640),
+    );
+
+    await _openViaMenu(tester);
+
+    expect(tester.takeException(), isNull);
+    // The oldest row (bottom of the list) is reachable by scrolling.
+    expect(find.text('agent-0'), findsNothing);
+    for (var i = 0; i < 12 && find.text('agent-0').evaluate().isEmpty; i++) {
+      await tester.dragFrom(const Offset(180, 400), const Offset(0, -300));
+      await tester.pump();
+    }
+    await tester.pump();
+    expect(find.text('agent-0'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

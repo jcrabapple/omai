@@ -40,13 +40,23 @@ const _statusWord = {
   SubagentStatus.aborted: 'Aborted',
 };
 
-/// TalkBack label for one row: agent name + status (+ current tool).
+/// TalkBack label for one row: agent, status, current tool, the first line
+/// of the task and the metrics, in one stop.
 String rowLabel(SubagentRow row) {
-  final bits = [_statusWord[row.status]!];
+  final bits = <String>[row.agent.isEmpty ? 'Subagent' : row.agent];
+  bits.add(_statusWord[row.status]!);
   if (row.status == SubagentStatus.running && row.currentTool.isNotEmpty) {
     bits.add(row.currentTool);
   }
-  return '${row.agent.isEmpty ? 'Subagent' : row.agent}: ${bits.join(', ')}';
+  final task = firstLine(row.taskText);
+  if (task.isNotEmpty) bits.add(task);
+  final metrics = <String>[
+    if (row.tokens != null) compactNumber(row.tokens!),
+    if (row.cost != null) money(row.cost!),
+    if (row.model.isNotEmpty) row.model,
+  ];
+  if (metrics.isNotEmpty) bits.add(metrics.join(' '));
+  return bits.join(', ');
 }
 
 class AgentsSheet extends ConsumerWidget {
@@ -96,20 +106,22 @@ class AgentsSheet extends ConsumerWidget {
                 ),
               )
             else
-              ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
-                children: [
-                  // Newest first: the roster sorts by index to match the
-                  // web store; on the phone the last-spawned agent is the
-                  // interesting one, so the sheet flips the order.
-                  for (final row in rows.reversed)
-                    _AgentRowTile(
-                      key: ValueKey('agent-row-${row.key}'),
-                      gwId: gwId,
-                      row: row,
-                    ),
-                ],
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: OmpMetrics.s2),
+                  children: [
+                    // Newest first: the roster sorts by index to match the
+                    // web store; on the phone the last-spawned agent is the
+                    // interesting one, so the sheet flips the order.
+                    for (final row in rows.reversed)
+                      _AgentRowTile(
+                        key: ValueKey('agent-row-${row.key}'),
+                        gwId: gwId,
+                        row: row,
+                      ),
+                  ],
+                ),
               ),
           ],
         ),
@@ -137,12 +149,16 @@ class _AgentRowTile extends StatelessWidget {
     return Semantics(
       button: true,
       label: rowLabel(row),
+      excludeSemantics: true,
       child: InkWell(
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (context) =>
-                  SubagentTranscriptPage(gwId: gwId, rowKey: row.key),
+              builder: (context) => SubagentTranscriptPage(
+                gwId: gwId,
+                rowKey: row.key,
+                rowIndex: row.index,
+              ),
             ),
           );
         },
@@ -340,10 +356,18 @@ class SubagentTranscriptPage extends ConsumerStatefulWidget {
     super.key,
     required this.gwId,
     required this.rowKey,
+    this.rowIndex,
   });
 
   final String gwId;
+
+  /// The roster row's key at the time the page was opened (`#index` before
+  /// omp assigns an id). The row may be RE-KEYED to the id later, so
+  /// [rowIndex] backs the lookup up.
   final String rowKey;
+
+  /// The row's stable index, matching rows whose key has migrated.
+  final int? rowIndex;
 
   @override
   ConsumerState<SubagentTranscriptPage> createState() =>
@@ -362,38 +386,41 @@ class _SubagentTranscriptPageState
 
   bool _firstLoadQueued = false;
 
+  /// A row matches by its key OR by its stable index: the roster re-keys
+  /// rows when omp assigns the id, and the page must not lose the row.
+  bool _matches(SubagentRow r) =>
+      r.key == widget.rowKey ||
+      (widget.rowIndex != null && r.index == widget.rowIndex);
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_firstLoadQueued) {
+    if (_firstLoadQueued) return;
+    if (ref.read(subagentsStoreProvider.select(_idOf)) != null) {
+      // An id is already there: the one and only first load starts now.
       _firstLoadQueued = true;
-      if (ref.read(subagentsStoreProvider.select(_idOf)) != null) {
-        _page = _PageState(
-          messages: const [],
-          nextByte: null,
-          loading: true,
-          loadingMore: false,
-          error: null,
-        );
-        _load(from: null);
-      }
+      _page = _PageState(
+        messages: const [],
+        nextByte: null,
+        loading: true,
+        loadingMore: false,
+        error: null,
+      );
+      _load(from: null);
     }
+    // No id yet: leave _firstLoadQueued false so the null -> non-null id
+    // transition in build's listener starts the first load later.
   }
 
   String? _idOf(List<SubagentRow> rows) {
     for (final r in rows) {
-      if (r.key == widget.rowKey) return r.id;
+      if (_matches(r)) return r.id;
     }
     return null;
   }
 
-  SubagentRow? get _row {
-    final rows = ref.read(subagentsStoreProvider);
-    for (final r in rows) {
-      if (r.key == widget.rowKey) return r;
-    }
-    return null;
-  }
+  SubagentRow? get _row =>
+      ref.read(subagentsStoreProvider).where(_matches).firstOrNull;
 
   /// Page forward. [from] is the previous nextByte; the first request starts
   /// at the beginning (no from param).
@@ -420,11 +447,12 @@ class _SubagentTranscriptPageState
       ];
       final nb = r['nextByte'];
       final next = nb is num ? nb.toInt() : null;
-      // Terminate if nextByte does not advance beyond the current offset.
-      final nextByte = next != null && (from == null || next > from)
+      final reset = r['reset'] == true;
+      // A reset rewinds the stream: a nextByte BELOW the current offset is
+      // the new cursor, not the end of paging.
+      final nextByte = next != null && (reset || from == null || next > from)
           ? next
           : null;
-      final reset = r['reset'] == true;
       setState(() {
         _page = _page.copyWith(
           messages: reset ? incoming : [..._page.messages, ...incoming],
@@ -451,10 +479,29 @@ class _SubagentTranscriptPageState
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
+    // The first load starts as soon as the row has an id: if it arrives
+    // AFTER the page opened, the null -> non-null transition kicks it off
+    // (guarded by _firstLoadQueued so it loads once).
+    ref.listen<SubagentRow?>(
+      subagentsStoreProvider.select((rows) => rows.where(_matches).firstOrNull),
+      (prev, next) {
+        if (!_firstLoadQueued && prev?.id == null && next?.id != null) {
+          _firstLoadQueued = true;
+          setState(() {
+            _page = _PageState(
+              messages: const [],
+              nextByte: null,
+              loading: true,
+              loadingMore: false,
+              error: null,
+            );
+          });
+          _load(from: null);
+        }
+      },
+    );
     final row = ref.watch(
-      subagentsStoreProvider.select(
-        (rows) => rows.where((r) => r.key == widget.rowKey).firstOrNull,
-      ),
+      subagentsStoreProvider.select((rows) => rows.where(_matches).firstOrNull),
     );
     final title = (row?.agent.isNotEmpty ?? false) ? row!.agent : 'Subagent';
     return Scaffold(

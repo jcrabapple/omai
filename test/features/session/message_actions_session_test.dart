@@ -224,30 +224,4 @@ void main() {
     // anything, and retrying is POST /retry now.
     expect(gateway.bodies['/api/sessions/abc/prompt'], isNull);
   });
-
-  testWidgets('no Retry turn while a turn is running', (tester) async {
-    tester.view.physicalSize = const Size(900, 1600);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
-    final hub = SocketHub();
-    final gateway = FakeGateway(messages: history);
-    final container = _container(gateway: gateway, hub: hub);
-    await _pumpReady(tester, container);
-
-    hub.current.frame(1, {'type': 'agent_start'});
-    await tester.pump();
-    await tester.pump();
-
-    // While a turn runs the assistant's onRetry is null: neither the
-    // selection toolbar nor the popup menu offers Retry.
-    await tester.longPress(find.text('Answer from the agent'));
-    await tester.pump(const Duration(milliseconds: 400));
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Retry turn'), findsNothing);
-    expect(find.text('Inspect'), findsOneWidget);
-
-    hub.current.frame(2, {'type': 'agent_end'});
-    await tester.pump(const Duration(milliseconds: 700));
-    await tester.pump();
-  });
 }

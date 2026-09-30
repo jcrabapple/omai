@@ -429,13 +429,10 @@ class _UsagePageState extends ConsumerState<UsagePage> {
       children: [
         Padding(
           padding: const EdgeInsets.only(top: OmpMetrics.s2),
-          child: Semantics(
-            label: 'Cost over the last ${agg.days} days: ${money(totals.cost)}',
-            child: Text(
-              '${totals.turns} ${totals.turns == 1 ? 'turn' : 'turns'} in the last ${agg.days} days',
-              key: const ValueKey('ledger-subtitle'),
-              style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsSm),
-            ),
+          child: Text(
+            '${totals.turns} ${totals.turns == 1 ? 'turn' : 'turns'} in the last ${agg.days} days',
+            key: const ValueKey('ledger-subtitle'),
+            style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsSm),
           ),
         ),
         Padding(

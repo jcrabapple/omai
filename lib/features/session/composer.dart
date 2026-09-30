@@ -21,8 +21,7 @@ import '../../composer/slash.dart';
 import '../../state/connection_notifier.dart';
 import '../../state/session_controller.dart';
 import '../../theme/tokens.dart';
-import '../../transcript/reducer.dart'
-    show LocalRetryInput, lastTurnFailure, reduce;
+import '../../transcript/reducer.dart' show lastTurnFailure;
 import '../../transcript/send.dart' show sendPlan, PromptMode;
 import 'image_tray.dart';
 import 'slash_menu.dart';
@@ -300,16 +299,9 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     if (_retryingTurn) return;
     setState(() => _retryingTurn = true);
     try {
-      final env = await ref.read(sessionEnvProvider.future);
-      await env.client.retry(widget.gwId);
-      final provider = sessionControllerProvider(widget.gwId);
-      final s = ref.read(provider);
-      // The controller's _dispatch is private; the retry is a pure
-      // transcript-state flag, so it is applied here (web: `retried`).
-      // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
-      ref.read(provider.notifier).state = s.copyWith(
-        transcript: reduce(s.transcript, const LocalRetryInput()),
-      );
+      await ref
+          .read(sessionControllerProvider(widget.gwId).notifier)
+          .retryTurn();
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.maybeOf(context)

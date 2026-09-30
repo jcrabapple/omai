@@ -332,15 +332,29 @@ void main() {
 
     // The gateway saw the fork at the matched user entry.
     expect(gateway.bodies['/api/sessions/abc/fork'], {'entryId': 'e1'});
+    await tester.pump();
+    await tester.pump();
+    // Let the route transition finish so the replaced parent is disposed.
+    await tester.pumpAndSettle();
+
+    // The new session screen replaced the parent on the navigator.
+    final screens = tester
+        .widgetList<SessionScreen>(find.byType(SessionScreen))
+        .toList();
+    expect(screens, hasLength(1));
+    expect(screens.single.gwId, 'kid');
     // The composer of the new session loaded the seeded draft.
     expect(
-      drafts.map.entries.any(
-        (e) => e.key.contains('kid') && e.value == 'question',
-      ),
-      isTrue,
+      find.byType(TextField),
+      findsWidgets,
+      reason: 'the composer is on screen',
     );
-    // The route was REPLACED: the new session's transcript is being loaded.
-    expect(gateway.visited.contains('/api/sessions/kid/messages'), isTrue);
+    expect(
+      tester.widget<TextField>(find.byType(TextField).first).controller!.text,
+      'question',
+    );
+    // The snack rides the NEW route's scaffold, not the replaced one.
+    expect(find.text('Forked to new session'), findsOneWidget);
   });
 
   testWidgets('a busy session shows the 409 snack and stays', (tester) async {

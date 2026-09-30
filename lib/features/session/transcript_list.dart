@@ -50,9 +50,14 @@ Future<void> forkFromItem(
   // could not have an entry (pending, failed, empty).
   if (state.running || !forkable(item)) return;
 
+  // Captured BEFORE any await: after pushReplacement the route's context is
+  // gone and looking the messenger/navigator up again would crash or lose
+  // the snack.
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final navigator = Navigator.of(context);
+
   void snack(String message) =>
-      ScaffoldMessenger.maybeOf(context)
-          ?.showSnackBar(SnackBar(content: Text(message)));
+      messenger?.showSnackBar(SnackBar(content: Text(message)));
 
   final env = await ref.read(sessionEnvProvider.future);
 
@@ -137,7 +142,7 @@ Future<void> forkFromItem(
   unawaited(ref.read(sessionsStoreProvider.notifier).refresh());
 
   if (!context.mounted) return;
-  Navigator.of(context).pushReplacement(
+  navigator.pushReplacement(
     MaterialPageRoute<void>(builder: (_) => SessionScreen(gwId: newGwId)),
   );
   snack(note ?? 'Forked to new session');

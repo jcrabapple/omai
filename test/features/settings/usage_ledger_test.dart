@@ -220,6 +220,37 @@ void main() {
       );
     });
 
+    testWidgets('the ledger subtitle is not masked by a semantics label', (
+      tester,
+    ) async {
+      final fake = FakeLedgerGateway({
+        '/api/ledger': ledgerBody,
+        '/api/ledger/sessions': sessionsBody,
+      });
+      await pumpPage(tester, fake);
+
+      // The visible subtitle text is plain: TalkBack reads
+      // "5 turns in the last 30 days" on its own, without a duplicate
+      // chart summary label wrapped around it.
+      final subtitle = find.byKey(const ValueKey('ledger-subtitle'));
+      expect(subtitle, findsOneWidget);
+      final masked = find.ancestor(
+        of: subtitle,
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is Semantics &&
+              w.properties.label != null &&
+              w.properties.label!.startsWith('Cost over the last'),
+        ),
+      );
+      expect(masked, findsNothing);
+      // The chart keeps its own summary label (exactly one).
+      expect(
+        find.bySemanticsLabel('Cost over the last 30 days: \$0.42'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('a 404 ledger shows the newer-gateway copy, not an error', (
       tester,
     ) async {
