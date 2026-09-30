@@ -55,12 +55,11 @@ Future<Diagnostics> defaultDiagnosticsFactory(Ref ref) async {
       final list = await client.sessions(limit: 1, includeSaved: false);
       return [for (final s in list.live) s.gwId];
     },
-    wsProbe: () async {
-      final list = await client.sessions(limit: 1, includeSaved: false);
-      if (list.live.isEmpty) return false;
+    wsProbe: (gwId) async {
+      // The gwId came from liveSessionIds above; no second listing (#8).
       final probe = ref.read(wsProbeProvider);
       return probe(
-        client.wsUrl('/omp-ws/${list.live.first.gwId}'),
+        client.wsUrl('/omp-ws/$gwId'),
         {'Authorization': 'Bearer $token'},
       );
     },
@@ -74,7 +73,7 @@ Diagnostics _signedOutDiagnostics() => Diagnostics(
   gatewayReachable: () async => throw const Offline('Signed out.'),
   signedIn: () async => throw const Offline('Signed out.'),
   liveSessionIds: () async => [],
-  wsProbe: () async => false,
+  wsProbe: (gwId) async => false,
   system: () async => throw const Offline('Signed out.'),
   modelCatalog: () async => throw const Offline('Signed out.'),
 );
@@ -82,13 +81,16 @@ Diagnostics _signedOutDiagnostics() => Diagnostics(
 final diagnosticsFactoryProvider =
     Provider<DiagnosticsFactory>((ref) => defaultDiagnosticsFactory);
 
-/// Holds the per-row state; the checks run outside any widget lifecycle so a
-/// navigation away cannot cancel them.
+/// Holds the per-row state. autoDispose (triage #7): results belong to an
+/// open page, and leaving the page discards them so the next open re-runs.
 class DiagnosticsController extends Notifier<DiagnosticsState> {
   int _generation = 0;
 
   @override
   DiagnosticsState build() {
+    // Watching the active connection id: a connection change rebuilds this
+    // notifier and re-runs the checks for the new connection (#7).
+    ref.watch(connectionNotifierProvider.select((c) => c.active?.id));
     _generation++;
     runAll();
     return const DiagnosticsState();
@@ -127,7 +129,7 @@ class DiagnosticsController extends Notifier<DiagnosticsState> {
 }
 
 final diagnosticsControllerProvider =
-    NotifierProvider<DiagnosticsController, DiagnosticsState>(
+    NotifierProvider.autoDispose<DiagnosticsController, DiagnosticsState>(
   DiagnosticsController.new,
 );
 

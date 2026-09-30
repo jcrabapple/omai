@@ -159,4 +159,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(actions.settings, ['appearance']);
   });
+
+  testWidgets('results stay fully above a keyboard inset', (tester) async {
+    // Simulated keyboard: a 300dp bottom inset.
+    tester.view.viewInsets = FakeViewPadding(bottom: 300);
+    await _pump(tester, live: [liveSession('a', name: 'Fix login bug')]);
+    final rowBottom = tester.getBottomRight(find.text('Fix login bug')).dy;
+    expect(
+      rowBottom,
+      lessThanOrEqualTo(900 - 300),
+      reason: 'the first result row must be fully above the keyboard',
+    );
+  });
 }

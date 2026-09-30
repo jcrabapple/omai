@@ -86,6 +86,10 @@ class _ConnectionPageState extends ConsumerState<ConnectionPage> {
   bool _loading = true;
   bool _signingOut = false;
 
+  /// Bumps on every load: a response from a previous load or connection
+  /// must never overwrite a newer one (review triage #13).
+  int _loadGen = 0;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +103,7 @@ class _ConnectionPageState extends ConsumerState<ConnectionPage> {
   }
 
   Future<void> _load() async {
+    final gen = ++_loadGen;
     setState(() {
       _loading = true;
       _error = null;
@@ -106,11 +111,12 @@ class _ConnectionPageState extends ConsumerState<ConnectionPage> {
     final connection = ref.read(connectionNotifierProvider);
     final active = connection.active;
     if (active == null) {
+      if (!mounted || gen != _loadGen) return;
       setState(() => _loading = false);
       return;
     }
     final token = await ref.read(tokenStoreProvider).read(active.id);
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
     final client = ref
         .read(gatewayClientFactoryProvider)
         (active.url, token ?? '');
@@ -119,7 +125,7 @@ class _ConnectionPageState extends ConsumerState<ConnectionPage> {
         client.system(),
         client.me().catchError((Object _) => ''),
       ]);
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() {
         _system = SystemInfo.fromJson(results[0]);
         final method = results[1] as String;
@@ -131,13 +137,13 @@ class _ConnectionPageState extends ConsumerState<ConnectionPage> {
         _loading = false;
       });
     } on GatewayClientError catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() {
         _error = e.message;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() {
         _error = 'Could not reach the gateway.';
         _loading = false;

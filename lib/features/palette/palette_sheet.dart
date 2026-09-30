@@ -82,8 +82,7 @@ class _PaletteSheetState extends ConsumerState<PaletteSheet> {
       live: sessions.live,
       saved: sessions.saved,
       now: DateTime.now().millisecondsSinceEpoch,
-      activeGwId:
-          ref.read(sessionsStoreProvider.notifier).openGwId,
+      activeGwId: ref.read(sessionsStoreProvider.notifier).openGwId,
       actions: widget.actions,
     );
     final query = _query.text.trim();
@@ -91,85 +90,99 @@ class _PaletteSheetState extends ConsumerState<PaletteSheet> {
     final ranked = rankItems(items, query);
 
     return SafeArea(
+      // The keyboard would otherwise cover the results: pad by the view
+      // inset and cap the sheet at ~85% of the screen so the list has a
+      // usable height above the keyboard (triage #10).
       child: Padding(
-        padding: const EdgeInsets.all(OmpMetrics.s4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: _query,
-              focusNode: _focus,
-              autofocus: true,
-              textInputAction: TextInputAction.go,
-              decoration: InputDecoration(
-                hintText: 'Search sessions and actions',
-                prefixIcon: const Icon(Icons.search),
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
-                ),
-              ),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (_) {
-                if (ranked.isNotEmpty) _run(ranked.first);
-              },
-            ),
-            const SizedBox(height: OmpMetrics.s2),
-            Flexible(
-              child: ranked.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: OmpMetrics.s5,
-                      ),
-                      child: Text(
-                        'No matches',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: tokens.ink3,
-                          fontSize: OmpMetrics.fsBase,
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      // At most a screenful; the sheet never scrolls the page.
-                      itemCount: ranked.length,
-                      itemBuilder: (context, i) {
-                        final item = ranked[i];
-                        // Section headers only in the empty-query menu.
-                        final header = query.isEmpty &&
-                            (i == 0 || ranked[i - 1].kind != item.kind);
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (header)
-                              Padding(
-                                padding: EdgeInsets.only(
-                                  top: i == 0 ? 0 : OmpMetrics.s2,
-                                  bottom: OmpMetrics.s1,
-                                  left: OmpMetrics.s2,
-                                ),
-                                child: Text(
-                                  kindLabels[item.kind] ?? '',
-                                  style: TextStyle(
-                                    color: tokens.ink3,
-                                    fontSize: OmpMetrics.fsXs,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ),
-                            _PaletteRow(
-                              item: item,
-                              onTap: () => _run(item),
-                            ),
-                          ],
-                        );
-                      },
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(OmpMetrics.s4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: _query,
+                  focusNode: _focus,
+                  autofocus: true,
+                  textInputAction: TextInputAction.go,
+                  decoration: InputDecoration(
+                    hintText: 'Search sessions and actions',
+                    prefixIcon: const Icon(Icons.search),
+                    isDense: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
                     ),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  onSubmitted: (_) {
+                    if (ranked.isNotEmpty) _run(ranked.first);
+                  },
+                ),
+                const SizedBox(height: OmpMetrics.s2),
+                Flexible(
+                  child: ranked.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: OmpMetrics.s5,
+                          ),
+                          child: Text(
+                            'No matches',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: tokens.ink3,
+                              fontSize: OmpMetrics.fsBase,
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          // At most a screenful; the sheet never scrolls the page.
+                          itemCount: ranked.length,
+                          itemBuilder: (context, i) {
+                            final item = ranked[i];
+                            // Section headers only in the empty-query menu.
+                            final header =
+                                query.isEmpty &&
+                                (i == 0 || ranked[i - 1].kind != item.kind);
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                if (header)
+                                  Padding(
+                                    padding: EdgeInsets.only(
+                                      top: i == 0 ? 0 : OmpMetrics.s2,
+                                      bottom: OmpMetrics.s1,
+                                      left: OmpMetrics.s2,
+                                    ),
+                                    child: Text(
+                                      kindLabels[item.kind] ?? '',
+                                      style: TextStyle(
+                                        color: tokens.ink3,
+                                        fontSize: OmpMetrics.fsXs,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ),
+                                _PaletteRow(
+                                  item: item,
+                                  onTap: () => _run(item),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

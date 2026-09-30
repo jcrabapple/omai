@@ -55,21 +55,18 @@ String? sniffImageMime(Uint8List bytes) {
 }
 
 /// An error to show the user, or null when the image can be attached.
-/// [attached] is how many images are already in the tray; [declaredMime] is
-/// what the source claims the bytes are (a file's mime type), which must be
-/// an accepted type and must match the bytes' magic bytes.
+/// [attached] is how many images are already in the tray. The decision is
+/// made purely on the sniffed bytes (triage #5): [declaredMime] is kept for
+/// call-site context but never rejects, because the gateway only checks the
+/// SNIFFED mime against the bytes and that is what we send.
 String? imageProblem(
   Uint8List bytes, {
   required int attached,
   String? declaredMime,
 }) {
   if (attached >= maxImages) return 'Up to $maxImages images per message';
-  if (declaredMime != null && !isImageType(declaredMime)) {
-    return 'Use a PNG, JPEG, WebP or GIF image';
-  }
   final sniffed = sniffImageMime(bytes);
-  if (sniffed == null ||
-      (declaredMime != null && declaredMime != sniffed)) {
+  if (sniffed == null) {
     return 'Use a PNG, JPEG, WebP or GIF image';
   }
   if (bytes.length > maxImageBytes) return 'Images can be at most 5 MB';

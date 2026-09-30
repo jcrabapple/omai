@@ -110,6 +110,8 @@ class SessionState {
     this.planPhases = const <TodoPhase>[],
     this.streamReconnects = 0,
     this.turnStats,
+    this.lastFailedSendId,
+    this.ackedRetryIds = const <String>{},
   }) : transcript = transcript ?? emptyTranscript();
 
   final String gwId;
@@ -155,6 +157,15 @@ class SessionState {
   /// Timing of the last finished turn, for "Stats for nerds".
   final TurnStats? turnStats;
 
+  /// The local id of the most recent failed send, so the composer can match
+  /// its restored content against the eventual Retry ack (triage #12).
+  final String? lastFailedSendId;
+
+  /// Local send ids whose Retry has been acked by the gateway. The composer
+  /// clears the restored text/images when one of these lands and its content
+  /// is unchanged (triage #12).
+  final Set<String> ackedRetryIds;
+
   /// Blocking dialogs omp is waiting on (for the approval takeover UI).
   List<UiRequest> get pendingUi => transcript.pendingUi;
 
@@ -181,6 +192,8 @@ class SessionState {
     int? streamReconnects,
     TurnStats? turnStats,
     bool clearTurnStats = false,
+    String? lastFailedSendId,
+    Set<String>? ackedRetryIds,
   }) {
     return SessionState(
       gwId: gwId,
@@ -199,6 +212,8 @@ class SessionState {
       planPhases: planPhases ?? this.planPhases,
       streamReconnects: streamReconnects ?? this.streamReconnects,
       turnStats: clearTurnStats ? null : (turnStats ?? this.turnStats),
+      lastFailedSendId: lastFailedSendId ?? this.lastFailedSendId,
+      ackedRetryIds: ackedRetryIds ?? this.ackedRetryIds,
     );
   }
 }
@@ -755,8 +770,18 @@ class SessionController extends Notifier<SessionState> {
 
   /// The prompt images of each local send, kept until the gateway acks so a
   /// failed images-only send can be retried (retrySend bails only when a
-  /// send had neither text nor images).
+  /// send had neither text nor images). Bounded: only the most recent
+  /// [_sendImagesLimit] failed sends keep their images (review triage #1).
   final Map<String, List<Map<String, String>>> _sendImages = {};
+
+  static const int _sendImagesLimit = 3;
+
+  void _retainSendImages(String localId, List<Map<String, String>> images) {
+    while (_sendImages.length >= _sendImagesLimit) {
+      _sendImages.remove(_sendImages.keys.first);
+    }
+    _sendImages[localId] = images;
+  }
 
   /// Send a prompt. Optimistic: the LocalSendInput paints the bubble before
   /// the request goes out. Durable at the composer level: on failure the
@@ -775,7 +800,9 @@ class SessionController extends Notifier<SessionState> {
       _dispatch(LocalSendRetryInput(localId));
     } else {
       // Keep the images for a possible retry; cleared once the gateway acks.
-      if (images != null && images.isNotEmpty) _sendImages[localId] = images;
+      if (images != null && images.isNotEmpty) {
+        _retainSendImages(localId, images);
+      }
       _dispatch(
         LocalSendInput(
           localId: localId,
@@ -793,9 +820,19 @@ class SessionController extends Notifier<SessionState> {
         mode: mode,
         images: images,
       );
+      // Drop the retained images as soon as the gateway acks, BEFORE the
+      // mounted check (triage #1): the map must not keep them when this
+      // controller is going away mid-send.
+      _sendImages.remove(localId);
       if (!ref.mounted) return true; // sent; nothing left to paint
       _setInfo(info);
-      _sendImages.remove(localId);
+      // A retried send just acked: record it so the composer can clear the
+      // content the failed send restored (triage #12).
+      if (retryLocalId != null) {
+        state = state.copyWith(
+          ackedRetryIds: {...state.ackedRetryIds, localId},
+        );
+      }
       if (mode != 'prompt') {
         unawaited(_refreshQueued(env, gwId, _generation));
       }
@@ -811,6 +848,9 @@ class SessionController extends Notifier<SessionState> {
           error: e is GatewayClientError ? e.message : 'Send failed',
         ),
       );
+      // Remember which send failed so the composer can match its restored
+      // content against the eventual Retry ack (triage #12).
+      state = state.copyWith(lastFailedSendId: localId);
       return false;
     }
   }
@@ -916,6 +956,8 @@ class SessionController extends Notifier<SessionState> {
     _statsPending = false;
     _flushScheduled = false;
     _pendingEvents.clear();
+    // Failed-send images belong to this controller only (triage #1).
+    _sendImages.clear();
     _stream?.stop();
     _stream = null;
   }

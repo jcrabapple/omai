@@ -41,6 +41,10 @@ class _UsagePageState extends ConsumerState<UsagePage> {
   String? _error;
   bool _loading = true;
 
+  /// Bumps on every load: a response from a previous load or connection
+  /// must never overwrite a newer one (review triage #13).
+  int _loadGen = 0;
+
   @override
   void initState() {
     super.initState();
@@ -54,34 +58,37 @@ class _UsagePageState extends ConsumerState<UsagePage> {
   }
 
   Future<void> _load() async {
+    final gen = ++_loadGen;
     setState(() {
       _loading = true;
       _error = null;
     });
     final active = ref.read(connectionNotifierProvider).active;
-    if (active == null || !mounted) {
-      if (mounted) setState(() => _loading = false);
+    if (active == null || !mounted || gen != _loadGen) {
+      if (mounted && gen == _loadGen) {
+        setState(() => _loading = false);
+      }
       return;
     }
     final token = await ref.read(tokenStoreProvider).read(active.id);
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
     final client =
         ref.read(gatewayClientFactoryProvider)(active.url, token ?? '');
     try {
       final json = await client.usage();
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() {
         _report = UsageReport.fromJson(json);
         _loading = false;
       });
     } on GatewayClientError catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() {
         _error = e.message;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() {
         _error = 'Could not reach the gateway.';
         _loading = false;

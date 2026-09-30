@@ -196,6 +196,47 @@ void main() {
         await container.read(sessionControllerProvider('abc').notifier).retrySend('missing');
     expect(ok, isFalse);
   });
+
+  test('image retention is bounded to the three most recent failed sends',
+      () async {
+    final fails = <String>{'/prompt'};
+    final bodies = <Map<String, Object?>>[];
+    final container = _container(
+      failPaths: fails,
+      bodiesOut: bodies,
+      onPrompt: (_) {},
+    );
+    addTearDown(container.dispose);
+    container.listen(sessionControllerProvider('abc'), (_, _) {});
+    await Future<void>.delayed(Duration.zero);
+    final controller =
+        container.read(sessionControllerProvider('abc').notifier);
+
+    final failedIds = <String>[];
+    for (var i = 0; i < 4; i++) {
+      await controller.send('', images: pngImages);
+      failedIds.add(_newestFailedLocalId(container));
+    }
+    fails.clear();
+
+    // The oldest images-only failed send had its images evicted: the retry
+    // is refused (no text, no images left).
+    final oldest =
+        await controller.retrySend(failedIds.first);
+    expect(oldest, isFalse,
+        reason: 'only the most recent 3 failed sends keep their images');
+
+    // The most recent one still retries with its images.
+    final promptsBefore =
+        bodies.where((b) => b['_path'] == '/api/sessions/abc/prompt').length;
+    final newest = await controller.retrySend(failedIds.last);
+    expect(newest, isTrue);
+    final prompts = bodies
+        .where((b) => b['_path'] == '/api/sessions/abc/prompt')
+        .toList();
+    expect(prompts.length, promptsBefore + 1);
+    expect(prompts.last['images'], pngImages);
+  });
 }
 
 String _failedLocalId(ProviderContainer container) {
@@ -205,4 +246,14 @@ String _failedLocalId(ProviderContainer container) {
     if (id != null) return id;
   }
   fail('no failed item found');
+}
+
+String _newestFailedLocalId(ProviderContainer container) {
+  final state = container.read(sessionControllerProvider('abc'));
+  String? last;
+  for (final item in state.transcript.items) {
+    if (item is UserItem && item.failed == true) last = item.localId;
+  }
+  if (last == null) fail('no failed item found');
+  return last;
 }

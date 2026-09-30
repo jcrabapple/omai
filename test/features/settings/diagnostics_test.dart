@@ -20,6 +20,7 @@ Diagnostics makeDiagnostics({
   },
   Future<bool> Function()? catalog,
   Completer<bool>? slowCatalog,
+  List<String>? probedIds,
 }) {
   Future<bool> unwrap(Object? v) async {
     if (v is Exception) throw v;
@@ -40,7 +41,10 @@ Diagnostics makeDiagnostics({
       return r == true ? 'bearer' : (me as String);
     },
     liveSessionIds: () async => live,
-    wsProbe: () => unwrap(ws),
+    wsProbe: (gwId) {
+      probedIds?.add(gwId);
+      return unwrap(ws);
+    },
     system: () async {
       final v = system;
       if (v is Exception) throw v;
@@ -93,6 +97,15 @@ void main() {
     final r = await d.checks[2].run();
     expect(r.status, CheckStatus.fail);
     expect(r.hint, contains('WebSockets'));
+  });
+
+  test('the probe receives the session id found by the lister, once', () async {
+    final probed = <String>[];
+    final d = makeDiagnostics(live: const ['gw-9'], ws: true, probedIds: probed);
+    final r = await d.checks[2].run();
+    expect(r.status, CheckStatus.pass);
+    expect(probed, ['gw-9'],
+        reason: 'the probe uses the listed id, with no second listing');
   });
 
   test('omp without a version fails with the omp hint', () async {

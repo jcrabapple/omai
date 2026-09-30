@@ -34,33 +34,30 @@ void main() {
   });
 
   group('imageProblem', () {
-    test('rejects a lying extension whose mime does not match the bytes', () {
-      // A PNG delivered as image/jpeg: the gateway checks the magic bytes
-      // against the claimed mime and would 422, so refuse up front.
+    // The declared mime never rejects (triage #5): the gateway only checks
+    // the sniffed mime against the bytes and we always SEND the sniffed
+    // mime, so the decision is purely on the bytes.
+    test('accepts a PNG delivered with a JPEG declaration', () {
       expect(
         imageProblem(png, attached: 0, declaredMime: 'image/jpeg'),
-        'Use a PNG, JPEG, WebP or GIF image',
-      );
-      // The same PNG with no claim (or a true claim) is fine.
-      expect(imageProblem(png, attached: 0), isNull);
-      expect(
-        imageProblem(png, attached: 0, declaredMime: 'image/png'),
         isNull,
       );
     });
 
-    test('rejects a lying mime that does not match the bytes', () {
+    test('accepts an image/jpg declaration', () {
       expect(
-        imageProblem(notAnImage, attached: 0, declaredMime: 'image/png'),
-        'Use a PNG, JPEG, WebP or GIF image',
+        imageProblem(jpeg, attached: 0, declaredMime: 'image/jpg'),
+        isNull,
       );
     });
 
-    test('rejects an unsupported declared type', () {
+    test('accepts JPEG bytes declared as HEIC and attaches image/jpeg', () {
       expect(
-        imageProblem(png, attached: 0, declaredMime: 'application/pdf'),
-        'Use a PNG, JPEG, WebP or GIF image',
+        imageProblem(jpeg, attached: 0, declaredMime: 'image/heic'),
+        isNull,
       );
+      // What we would attach is the sniffed mime, image/jpeg.
+      expect(toPromptImage(jpeg)['mimeType'], 'image/jpeg');
     });
 
     test('rejects bytes that are not an image at all', () {

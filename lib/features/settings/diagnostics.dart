@@ -14,7 +14,10 @@ import '../../api/errors.dart';
 typedef HealthCheck = Future<bool> Function();
 typedef MeCheck = Future<String> Function();
 typedef SessionLister = Future<List<String>> Function();
-typedef WsProber = Future<bool> Function();
+
+/// Probes the WebSocket for the session id the lister found (triage #8: no
+/// second listing inside the probe).
+typedef WsProber = Future<bool> Function(String gwId);
 typedef SystemFetcher = Future<Map<String, Object?>> Function();
 typedef CatalogFetcher = Future<bool> Function();
 
@@ -110,7 +113,7 @@ class Diagnostics {
           hint: 'Checked once a session is live.');
     }
     try {
-      return await wsProbe()
+      return await wsProbe(live.first)
           ? CheckResult.pass
           : const CheckResult(CheckStatus.fail,
               hint: 'A proxy may be blocking WebSockets.');

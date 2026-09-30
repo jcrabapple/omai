@@ -50,6 +50,10 @@ class _SkillsPageState extends ConsumerState<SkillsPage> {
   List<SkillEntry>? _skills;
   String? _error;
 
+  /// Bumps on every load: a response from a previous load or connection
+  /// must never overwrite a newer one (review triage #13).
+  int _loadGen = 0;
+
   @override
   void initState() {
     super.initState();
@@ -63,28 +67,29 @@ class _SkillsPageState extends ConsumerState<SkillsPage> {
   }
 
   Future<void> _load() async {
+    final gen = ++_loadGen;
     setState(() {
       _skills = null;
       _error = null;
     });
     final active = ref.read(connectionNotifierProvider).active;
-    if (active == null || !mounted) {
-      if (mounted) setState(() => _error = 'Not signed in.');
+    if (active == null || !mounted || gen != _loadGen) {
+      if (mounted && gen == _loadGen) setState(() => _error = 'Not signed in.');
       return;
     }
     final token = await ref.read(tokenStoreProvider).read(active.id);
-    if (!mounted) return;
+    if (!mounted || gen != _loadGen) return;
     final client =
         ref.read(gatewayClientFactoryProvider)(active.url, token ?? '');
     try {
       final json = await client.skills();
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() => _skills = SkillEntry.sorted(json));
     } on GatewayClientError catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() => _error = e.message);
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || gen != _loadGen) return;
       setState(() => _error = 'Could not reach the gateway.');
     }
   }

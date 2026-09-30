@@ -328,16 +328,21 @@ class _Segmented<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
-    return SegmentedButton<T>(
-      segments: [
-        for (final entry in labels.entries)
-          ButtonSegment(value: entry.key, label: Text(entry.value)),
-      ],
-      selected: {value},
-      onSelectionChanged: (s) => onChanged(s.first),
-      style: ButtonStyle(
-        foregroundColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? tokens.ink : tokens.ink3,
+    // Horizontal scroll (triage #11): at narrow widths with large text the
+    // segments must overflow into a scroll, never a RenderFlex overflow.
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SegmentedButton<T>(
+        segments: [
+          for (final entry in labels.entries)
+            ButtonSegment(value: entry.key, label: Text(entry.value)),
+        ],
+        selected: {value},
+        onSelectionChanged: (s) => onChanged(s.first),
+        style: ButtonStyle(
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected) ? tokens.ink : tokens.ink3,
+          ),
         ),
       ),
     );

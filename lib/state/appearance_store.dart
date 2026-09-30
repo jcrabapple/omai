@@ -114,18 +114,32 @@ class AppearanceSettings {
       followSystem: m['followSystem'] is bool ? m['followSystem'] as bool : true,
       accentHex: AccentChoice.sanitizeHex(m['accent'] as String?),
       density: AppearanceDensityX.fromName(m['density'] as String?),
-      textScale: appearanceTextScales.contains(m['textScale'])
-          ? m['textScale'] as double
-          : 1.0,
+      // Any number (int or double) is accepted and matched against the
+      // allowed list; everything else falls back to the default (#3).
+      textScale: _textScaleOf(m['textScale']) ?? 1.0,
     );
   }
 
-  /// Decodes a persisted JSON string; anything unparsable is the defaults.
+  /// Accepts any [num] (JSON ints arrive as int, not double), then matches
+  /// the allowed list exactly.
+  static double? _textScaleOf(Object? v) {
+    if (v is! num) return null;
+    final d = v.toDouble();
+    for (final s in appearanceTextScales) {
+      if (s == d) return s;
+    }
+    return null;
+  }
+
+  /// Decodes a persisted JSON string; ANY decode or shape error (bad JSON,
+  /// wrong JSON types) is the defaults, never a throw out of _load (#3).
   static AppearanceSettings decode(String? raw) {
     if (raw == null || raw.isEmpty) return const AppearanceSettings();
     try {
       return sanitize(jsonDecode(raw));
     } on FormatException {
+      return const AppearanceSettings();
+    } on TypeError {
       return const AppearanceSettings();
     }
   }

@@ -91,6 +91,10 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   int _sel = 0;
   Timer? _saveTimer;
 
+  // The failed send the composer is holding restored content for: when its
+  // Retry acks and the content is unchanged, it is cleared (triage #12).
+  _FailedSendSnapshot? _failedSend;
+
   // Captured in initState so dispose can flush without touching ref.
   DraftKv? _kv;
   String _connId = '';
@@ -253,7 +257,17 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       await _saveDraftNow();
     } else {
       // The failed bubble explains why; the words come back so nothing is
-      // lost, and the draft keeps them.
+      // lost, and the draft keeps them. Snapshot the content so a later
+      // Retry ack can clear exactly what this failed send restored (#12).
+      final ctrlState = ref.read(sessionControllerProvider(widget.gwId));
+      final failedId = ctrlState.lastFailedSendId;
+      _failedSend = failedId == null
+          ? null
+          : _FailedSendSnapshot(
+              localId: failedId,
+              text: _text.text,
+              images: List.of(_images),
+            );
       _dismissedFor = null;
       await _saveDraftNow();
     }
@@ -273,6 +287,25 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
+    // A Retry ack for the failed send we are holding: clear the restored
+    // text and images if the user has not touched them since (#12).
+    ref.listen(sessionControllerProvider(widget.gwId), (prev, next) {
+      final failed = _failedSend;
+      if (failed == null || !next.ackedRetryIds.contains(failed.localId)) {
+        return;
+      }
+      _failedSend = null;
+      final unchanged =
+          _text.text == failed.text && _matchesSnapshot(failed);
+      if (!unchanged) return;
+      setState(() {
+        _text.clear();
+        _images.clear();
+        _imageProblem = null;
+        _dismissedFor = null;
+      });
+      unawaited(_saveDraftNow());
+    });
     final state = ref.watch(sessionControllerProvider(widget.gwId));
     final streaming = state.running;
     final ended =
@@ -483,6 +516,19 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
     );
   }
 
+  /// True when the tray still holds exactly the images the failed send
+  /// restored (same ids and bytes, same order).
+  bool _matchesSnapshot(_FailedSendSnapshot failed) {
+    if (_images.length != failed.images.length) return false;
+    for (var i = 0; i < _images.length; i++) {
+      if (_images[i].id != failed.images[i].id ||
+          _images[i].bytes != failed.images[i].bytes) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// The round send button beside the field: a 40dp circle inside a 48dp
   /// touch target (the padded tap target), so it looks compact without
   /// becoming hard to hit.
@@ -541,4 +587,18 @@ class _SessionComposerState extends ConsumerState<SessionComposer> {
       setState(() {});
     }
   }
+}
+
+/// The content a failed send restored into the composer, matched against the
+/// composer when that send's Retry acks (triage #12).
+class _FailedSendSnapshot {
+  const _FailedSendSnapshot({
+    required this.localId,
+    required this.text,
+    required this.images,
+  });
+
+  final String localId;
+  final String text;
+  final List<AttachedImage> images;
 }

@@ -22,8 +22,11 @@ class FixedAppearance extends AppearanceStore {
   AppearanceSettings build() => initial;
 }
 
-Future<ProviderContainer> pump(WidgetTester tester,
-    {AppearanceSettings initial = const AppearanceSettings()}) async {
+Future<ProviderContainer> pump(
+  WidgetTester tester, {
+  AppearanceSettings initial = const AppearanceSettings(),
+  TextScaler? textScaler,
+}) async {
   final kv = MemoryKv();
   final container = ProviderContainer(overrides: [
     reviewedKvProvider.overrideWithValue(kv),
@@ -35,7 +38,15 @@ Future<ProviderContainer> pump(WidgetTester tester,
       container: container,
       child: MaterialApp(
         theme: OmpTheme.data(OmpPreset.terminal),
-        home: const AppearancePage(),
+        home: Builder(
+          builder: (context) => textScaler == null
+              ? const AppearancePage()
+              : MediaQuery(
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: textScaler),
+                  child: const AppearancePage(),
+                ),
+        ),
       ),
     ),
   );
@@ -44,6 +55,26 @@ Future<ProviderContainer> pump(WidgetTester tester,
 }
 
 void main() {
+  testWidgets('no RenderFlex overflow at narrow width with large text', (
+    tester,
+  ) async {
+    // 2.0 system text scale x 1.3 app text scale, 360dp wide.
+    tester.view.physicalSize = const Size(360, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await pump(
+      tester,
+      initial: const AppearanceSettings(textScale: 1.3),
+      textScaler: const TextScaler.linear(2.0 * 1.3),
+    );
+    // Every section must lay out, including the density and text size
+    // segmented controls.
+    await tester.ensureVisible(find.text('Larger'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull,
+        reason: 'no RenderFlex overflow for the segmented controls');
+  });
+
   testWidgets('tapping a preset card updates the store and the semantics',
       (tester) async {
     final container = await pump(tester);

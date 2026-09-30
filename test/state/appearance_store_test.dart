@@ -68,6 +68,36 @@ void main() {
     expect(s.textScale, 1.15);
   });
 
+  test('textScale accepts any num and falls back on other shapes', () {
+    // An int 1 from JSON means the allowed 1.0.
+    expect(
+      AppearanceSettings.sanitize({'textScale': 1}).textScale,
+      1.0,
+    );
+    // A string is not a number: the default.
+    expect(
+      AppearanceSettings.sanitize({'textScale': 'big'}).textScale,
+      1.0,
+    );
+  });
+
+  test('decode falls back to defaults on any decode or shape error', () {
+    // A JSON number where a string is expected: TypeError, not a throw.
+    expect(
+      AppearanceSettings.decode('{"theme": 5}'),
+      const AppearanceSettings(),
+    );
+    expect(
+      AppearanceSettings.decode('{"density": 5}'),
+      const AppearanceSettings(),
+    );
+    expect(
+      AppearanceSettings.decode('{"preset": 5, "theme": 5}'),
+      const AppearanceSettings(),
+    );
+    expect(AppearanceSettings.decode('{not json'), const AppearanceSettings());
+  });
+
   test('effectivePreset ports the web effectiveTheme getter', () {
     const follow = AppearanceSettings();
     expect(follow.effectivePreset(Brightness.light), OmpPreset.paper);

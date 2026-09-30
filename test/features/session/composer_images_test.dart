@@ -28,15 +28,17 @@ import 'package:ohmypi/theme/presets.dart';
 import '../../stream/fakes.dart';
 
 /// A real 1x1 PNG so Image.memory decodes in tests.
-final pngBytes = Uint8List.fromList(base64Decode(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-));
+final pngBytes = Uint8List.fromList(
+  base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  ),
+);
 
 http.Response _json(Object? body, {int status = 200}) => http.Response(
-      jsonEncode(body),
-      status,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  status,
+  headers: {'content-type': 'application/json'},
+);
 
 class _FixedTokenStore implements TokenStore {
   @override
@@ -89,42 +91,45 @@ class FakeGateway {
   int promptCalls = 0;
 
   http.Client client() => MockClient((req) async {
-        if (req.body.isNotEmpty) {
-          final decoded = jsonDecode(req.body);
-          if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
-        }
-        if (failPaths.any(req.url.path.endsWith)) {
-          return _json({'error': 'nope'}, status: 500);
-        }
-        if (req.url.path.endsWith('/prompt')) {
-          promptCalls++;
-          return _json({
-            'gwId': 'abc',
-            'cwd': '/work/x',
-            'isStreaming': false,
-            'lastEventSeq': 0,
-          });
-        }
-        if (req.url.path.endsWith('/messages')) {
-          return _json({'messages': []});
-        }
-        if (req.url.path.endsWith('/state')) return _json({});
-        if (req.url.path.endsWith('/stats')) return _json({'data': {}});
-        if (req.url.path.endsWith('/commands')) {
-          return _json({'data': {'commands': []}});
-        }
-        return _json({
-          'gwId': 'abc',
-          'cwd': '/work/x',
-          'isStreaming': false,
-          'lastEventSeq': 0,
-        });
+    if (req.body.isNotEmpty) {
+      final decoded = jsonDecode(req.body);
+      if (decoded is Map<String, Object?>) bodies[req.url.path] = decoded;
+    }
+    if (failPaths.any(req.url.path.endsWith)) {
+      return _json({'error': 'nope'}, status: 500);
+    }
+    if (req.url.path.endsWith('/prompt')) {
+      promptCalls++;
+      return _json({
+        'gwId': 'abc',
+        'cwd': '/work/x',
+        'isStreaming': false,
+        'lastEventSeq': 0,
       });
+    }
+    if (req.url.path.endsWith('/messages')) {
+      return _json({'messages': []});
+    }
+    if (req.url.path.endsWith('/state')) return _json({});
+    if (req.url.path.endsWith('/stats')) return _json({'data': {}});
+    if (req.url.path.endsWith('/commands')) {
+      return _json({
+        'data': {'commands': []},
+      });
+    }
+    return _json({
+      'gwId': 'abc',
+      'cwd': '/work/x',
+      'isStreaming': false,
+      'lastEventSeq': 0,
+    });
+  });
 }
 
 ProviderContainer _container({
   required FakeGateway gateway,
   required SocketHub hub,
+  MemoryDraftKv? draftKv,
 }) {
   final env = SessionEnv(
     client: GatewayClient(
@@ -147,9 +152,10 @@ ProviderContainer _container({
       tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
       sessionsPollIntervalProvider.overrideWithValue(const Duration(hours: 1)),
       reviewedKvProvider.overrideWithValue(MemoryReviewedKv()),
-      draftKvProvider.overrideWithValue(MemoryDraftKv()),
+      draftKvProvider.overrideWithValue(draftKv ?? MemoryDraftKv()),
       gatewayClientFactoryProvider.overrideWith(
-        (ref) => (baseUrl, token) => GatewayClient(
+        (ref) =>
+            (baseUrl, token) => GatewayClient(
               baseUrl: baseUrl,
               token: token,
               client: gateway.client(),
@@ -167,7 +173,10 @@ ProviderContainer _container({
   return container;
 }
 
-Future<void> _pumpReady(WidgetTester tester, ProviderContainer container) async {
+Future<void> _pumpReady(
+  WidgetTester tester,
+  ProviderContainer container,
+) async {
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
@@ -216,8 +225,11 @@ void main() {
 
     await attachOne(tester);
     await attachOne(tester);
-    expect(find.byType(Image), findsNWidgets(2),
-        reason: 'two thumbnails in the tray');
+    expect(
+      find.byType(Image),
+      findsNWidgets(2),
+      reason: 'two thumbnails in the tray',
+    );
     expect(find.bySemanticsLabel('Remove image 1'), findsOneWidget);
     expect(find.bySemanticsLabel('Remove image 2'), findsOneWidget);
     semantics.dispose();
@@ -259,8 +271,11 @@ void main() {
       findsOneWidget,
       reason: 'the problem shows inline under the tray',
     );
-    expect(find.byType(Image), findsNWidgets(4),
-        reason: 'the refused image is not added');
+    expect(
+      find.byType(Image),
+      findsNWidgets(4),
+      reason: 'the refused image is not added',
+    );
 
     // The next change clears the problem.
     await tester.tap(find.bySemanticsLabel('Remove image 1'));
@@ -269,8 +284,9 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('images-only send posts message: empty with the sniffed mime',
-      (tester) async {
+  testWidgets('images-only send posts message: empty with the sniffed mime', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(900, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -289,8 +305,11 @@ void main() {
     expect(body['message'], '');
     final images = body['images'] as List;
     expect(images, hasLength(1));
-    expect((images.first as Map)['mimeType'], 'image/png',
-        reason: 'the mime is sniffed from the magic bytes');
+    expect(
+      (images.first as Map)['mimeType'],
+      'image/png',
+      reason: 'the mime is sniffed from the magic bytes',
+    );
     expect((images.first as Map)['type'], 'image');
     expect(
       ((images.first as Map)['data'] as String).startsWith('data:'),
@@ -323,8 +342,11 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.byType(Image), findsNWidgets(2),
-        reason: 'the failed send keeps the images attached');
+    expect(
+      find.byType(Image),
+      findsNWidgets(2),
+      reason: 'the failed send keeps the images attached',
+    );
     expect(find.text('Retry'), findsOneWidget);
   });
 
@@ -356,5 +378,97 @@ void main() {
     final images = body['images'] as List;
     expect(images, hasLength(1));
     expect((images.first as Map)['mimeType'], 'image/png');
+  });
+
+  testWidgets('a successful retry clears unchanged composer text and images', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final gateway = FakeGateway()..failPaths.add('/prompt');
+    final kv = MemoryDraftKv();
+    final container = _container(
+      gateway: gateway,
+      hub: SocketHub(),
+      draftKv: kv,
+    );
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    await attachOne(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Message omp'),
+      'try again please',
+    );
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Retry'), findsOneWidget);
+
+    gateway.failPaths.clear();
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(
+      find.widgetWithText(TextField, 'try again please'),
+      findsNothing,
+      reason: 'the restored text is cleared once the retry acks',
+    );
+    expect(
+      find.byType(Image),
+      findsNothing,
+      reason: 'the restored images are cleared too',
+    );
+    expect(
+      kv.map['ompgw-draft:c1:abc'],
+      isNull,
+      reason: 'the draft storage is cleared in the unchanged case',
+    );
+  });
+
+  testWidgets('a successful retry keeps composer content the user edited', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final gateway = FakeGateway()..failPaths.add('/prompt');
+    final kv = MemoryDraftKv();
+    final container = _container(
+      gateway: gateway,
+      hub: SocketHub(),
+      draftKv: kv,
+    );
+    addTearDown(container.dispose);
+    await _pumpReady(tester, container);
+
+    await attachOne(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Message omp'),
+      'original words',
+    );
+    await tester.tap(find.byIcon(Icons.arrow_upward));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Retry'), findsOneWidget);
+
+    // The user edits while the send is failed.
+    await tester.enterText(
+      find.widgetWithText(TextField, 'original words'),
+      'edited words',
+    );
+    gateway.failPaths.clear();
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(
+      find.widgetWithText(TextField, 'edited words'),
+      findsOneWidget,
+      reason: 'edited content is kept',
+    );
+    expect(
+      find.byType(Image),
+      findsOneWidget,
+      reason: 'the attached image is kept when the text was edited',
+    );
   });
 }

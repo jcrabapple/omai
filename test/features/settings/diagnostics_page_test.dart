@@ -5,13 +5,34 @@
 
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ohmypi/api/errors.dart';
 import 'package:ohmypi/features/settings/diagnostics.dart';
+import 'package:ohmypi/state/connection_notifier.dart';
+import 'package:ohmypi/state/connection_store.dart';
+import 'package:ohmypi/state/sessions_store.dart';
 import 'package:ohmypi/theme/presets.dart';
 import 'package:ohmypi/features/settings/diagnostics_page.dart';
+
+class _FixedTokenStore implements TokenStore {
+  @override
+  Future<String?> read(String connectionId) async => 'tok';
+  @override
+  Future<void> write(String connectionId, String token) async {}
+  @override
+  Future<void> delete(String connectionId) async {}
+}
+
+class MemoryPrefs implements ConnectionPrefs {
+  MemoryPrefs(this.records);
+  final List<ConnectionRecord> records;
+  @override
+  Future<List<ConnectionRecord>> load() async => records;
+  @override
+  Future<void> save(List<ConnectionRecord> connections) async {}
+}
 
 Diagnostics fakeDiagnostics({
   Object? me = 'bearer',
@@ -26,7 +47,7 @@ Diagnostics fakeDiagnostics({
       return me as String;
     },
     liveSessionIds: () async => live,
-    wsProbe: () async {
+    wsProbe: (gwId) async {
       if (ws is Future) return await ws;
       return ws == true;
     },
@@ -119,5 +140,93 @@ void main() {
       container.read(diagnosticsControllerProvider).results.length,
       5,
     );
+  });
+
+  testWidgets('reopening the page runs fresh checks (autoDispose)', (
+    tester,
+  ) async {
+    var builds = 0;
+    final container = ProviderContainer(overrides: [
+      diagnosticsFactoryProvider.overrideWithValue((ref) async {
+        builds++;
+        return fakeDiagnostics();
+      }),
+    ]);
+    addTearDown(container.dispose);
+    Future<void> open() => tester.tap(find.byKey(const ValueKey('diag-open')));
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: OmpTheme.data(OmpPreset.terminal),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                key: const ValueKey('diag-open'),
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DiagnosticsPage()),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await open();
+    await tester.pumpAndSettle();
+    expect(find.byType(DiagnosticsPage), findsOneWidget);
+    expect(builds, 1, reason: 'the first open runs the checks');
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(DiagnosticsPage), findsNothing);
+    await open();
+    await tester.pumpAndSettle();
+    expect(builds, 2,
+        reason: 'the reopened page discards the stale results and reruns');
+  });
+
+  testWidgets('a connection change while open re-runs the checks', (
+    tester,
+  ) async {
+    var builds = 0;
+    final container = ProviderContainer(overrides: [
+      diagnosticsFactoryProvider.overrideWithValue((ref) async {
+        builds++;
+        return fakeDiagnostics();
+      }),
+      connectionPrefsProvider.overrideWithValue(MemoryPrefs(const [
+        ConnectionRecord(id: 'c1', url: 'https://one', label: 'One'),
+        ConnectionRecord(id: 'c2', url: 'https://two', label: 'Two'),
+      ])),
+      tokenStoreProvider.overrideWithValue(_FixedTokenStore()),
+      sessionsPollIntervalProvider.overrideWithValue(const Duration(hours: 1)),
+    ]);
+    addTearDown(container.dispose);
+    // The notifier's own async load settles on connections.last (c2); let
+    // it settle before switching, so the change below is a real c2 -> c1.
+    final notifier = container.read(connectionNotifierProvider.notifier);
+    container.read(connectionNotifierProvider);
+    await tester.pump();
+    final settled = container.read(connectionNotifierProvider);
+    final initialActive = settled.active?.id;
+    final other = initialActive == 'c1' ? 'c2' : 'c1';
+    final switched = settled.copyWith(activeId: other);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: OmpTheme.data(OmpPreset.terminal),
+          home: const DiagnosticsPage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(builds, 1);
+    notifier.state = switched;
+    await tester.pumpAndSettle();
+    expect(container.read(connectionNotifierProvider).active?.id, other);
+    expect(builds, 2,
+        reason: 'a changed connection id reruns the checks');
   });
 }
