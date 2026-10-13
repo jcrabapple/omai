@@ -52,8 +52,11 @@ SessionInfo _liveSession(String gwId, String file) => SessionInfo(
 class FakeSessionsStore extends SessionsStore {
   FakeSessionsStore(this._initial);
   final SessionsState _initial;
+  static int refreshes = 0;
   @override
   SessionsState build() => _initial;
+  @override
+  Future<void> refresh() async => refreshes++;
 }
 
 /// Fake gateway that records path + query. [gate], when set, holds the first
@@ -154,6 +157,72 @@ void main() {
     'results': [],
     'indexed': {'files': 2, 'messages': 40},
   };
+
+  group('review fixes', () {
+    testWidgets('opening the page refreshes the sessions list once', (
+      tester,
+    ) async {
+      FakeSessionsStore.refreshes = 0;
+      final fake = FakeSearchGateway({'/api/search': emptyBody});
+      await _pump(tester, fake, onOpenLive: (_) {}, onResume: (_, _) async {});
+      expect(FakeSessionsStore.refreshes, 1);
+    });
+
+    testWidgets('a new query after "No matches" shows progress, not the old '
+        'message', (tester) async {
+      final fake = FakeSearchGateway({'/api/search': emptyBody});
+      await _pump(tester, fake, onOpenLive: (_) {}, onResume: (_, _) async {});
+      await tester.enterText(find.byType(TextField), 'zzz');
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      expect(find.text('No matches for "zzz".'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'zzzq');
+      await tester.pump();
+      expect(find.text('No matches for "zzz".'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      expect(find.text('No matches for "zzzq".'), findsOneWidget);
+    });
+
+    testWidgets('a second tap while a resume is in flight is ignored', (
+      tester,
+    ) async {
+      final fake = FakeSearchGateway({
+        '/api/search': {
+          'total': 1,
+          'results': [
+            {'path': '/old/s.jsonl', 'title': 'Sink notes', 'snippet': 'hi'},
+          ],
+        },
+      });
+      final gate = Completer<void>();
+      var calls = 0;
+      await _pump(
+        tester,
+        fake,
+        onOpenLive: (_) {},
+        onResume: (_, _) {
+          calls++;
+          return gate.future;
+        },
+      );
+      await tester.enterText(find.byType(TextField), 'q');
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pump();
+      await tester.tap(find.text('Sink notes'));
+      await tester.pump();
+      await tester.tap(find.text('Sink notes'));
+      await tester.pump();
+      expect(calls, 1);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      gate.complete();
+      await tester.pump();
+      await tester.tap(find.text('Sink notes'));
+      await tester.pump();
+      expect(calls, 2);
+    });
+  });
 
   group('query behaviour', () {
     testWidgets('debounces rapid typing into one request', (tester) async {

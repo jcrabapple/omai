@@ -252,6 +252,21 @@ void main() {
     );
   });
 
+  testWidgets('a stale hidden key alone does not summon the button', (
+    tester,
+  ) async {
+    final c = _container(
+      [savedJson('/s/a.jsonl', '/w/p'), savedJson('/s/b.jsonl', '/w/p')],
+      seed: {
+        hiddenFoldersKey('c1'): jsonEncode(['/gone']),
+      },
+    );
+    addTearDown(c.container.dispose);
+    await _pump(tester, c.container);
+    expect(c.container.read(hiddenFoldersProvider), {'/gone'});
+    expect(_filterButton(), findsNothing);
+  });
+
   testWidgets('everything filtered out is not "No sessions yet"', (
     tester,
   ) async {

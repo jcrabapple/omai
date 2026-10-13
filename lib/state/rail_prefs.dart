@@ -30,6 +30,11 @@ abstract class _ConnectionSetStore extends Notifier<Set<String>> {
   String _connId = '';
   bool _dirty = false;
 
+  /// The stored set for the current connection. Mutations await it first:
+  /// a read-modify-write against the not-yet-loaded empty set would persist
+  /// only the new value and wipe everything already stored.
+  Future<void> _loaded = Future.value();
+
   String keyFor(String connId);
 
   ReviewedKv get _kv => ref.read(reviewedKvProvider);
@@ -40,7 +45,7 @@ abstract class _ConnectionSetStore extends Notifier<Set<String>> {
       connectionNotifierProvider.select((s) => s.active?.id ?? ''),
     );
     _dirty = false;
-    _load(_connId);
+    _loaded = _load(_connId);
     return const {};
   }
 
@@ -57,10 +62,18 @@ abstract class _ConnectionSetStore extends Notifier<Set<String>> {
     await _kv.set(keyFor(_connId), jsonEncode(next.toList()));
   }
 
+  /// Waits for the stored set; false when the provider went away or the
+  /// connection changed meanwhile (the mutation belonged to the old one).
+  Future<bool> _ready() async {
+    final connId = _connId;
+    await _loaded;
+    return ref.mounted && _connId == connId;
+  }
+
   bool contains(String value) => state.contains(value);
 
   Future<void> toggle(String value) async {
-    if (value.isEmpty) return;
+    if (value.isEmpty || !await _ready()) return;
     if (state.contains(value)) {
       await _write({...state}..remove(value));
       return;
@@ -75,12 +88,12 @@ abstract class _ConnectionSetStore extends Notifier<Set<String>> {
   }
 
   Future<void> remove(String value) async {
-    if (!state.contains(value)) return;
+    if (!await _ready() || !state.contains(value)) return;
     await _write({...state}..remove(value));
   }
 
   Future<void> clear() async {
-    if (state.isEmpty) return;
+    if (!await _ready() || state.isEmpty) return;
     await _write(const {});
   }
 }

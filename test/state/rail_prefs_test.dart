@@ -1,6 +1,7 @@
 // Rail prefs stores: toggle/persist per connection, corrupt storage recovery,
 // cap, and the load-vs-write race (a toggle before the load finishes wins).
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +17,17 @@ class _MemoryKv implements ReviewedKv {
   Future<String?> get(String key) async => map[key];
   @override
   Future<void> set(String key, String value) async => map[key] = value;
+}
+
+/// A kv whose reads wait for [gate]: the load stays in flight until the
+/// test opens it (real SharedPreferences is slower than a microtask).
+class _GatedKv extends _MemoryKv {
+  final gate = Completer<void>();
+  @override
+  Future<String?> get(String key) async {
+    await gate.future;
+    return map[key];
+  }
 }
 
 class _Tokens implements TokenStore {
@@ -105,14 +117,41 @@ void main() {
     expect(jsonDecode(kv.map[hiddenFoldersKey('c1')]!), isEmpty);
   });
 
-  test('a toggle before the load finishes is not overwritten by it', () async {
-    final kv = _MemoryKv()..map[hiddenFoldersKey('c1')] = jsonEncode(['/old']);
+  test(
+    'a toggle before the load finishes merges with the stored set',
+    () async {
+      final kv = _GatedKv()..map[hiddenFoldersKey('c1')] = jsonEncode(['/old']);
+      final c = _container(kv);
+      addTearDown(c.dispose);
+      c.read(hiddenFoldersProvider);
+      // The load is held open while the toggle starts.
+      final toggled = c.read(hiddenFoldersProvider.notifier).toggle('/new');
+      await _settle();
+      kv.gate.complete();
+      await toggled;
+      await _settle();
+      expect(c.read(hiddenFoldersProvider), {'/old', '/new'});
+      expect((jsonDecode(kv.map[hiddenFoldersKey('c1')]!) as List).toSet(), {
+        '/old',
+        '/new',
+      });
+    },
+  );
+
+  test('remove and clear before the load finishes still act', () async {
+    final kv = _MemoryKv()
+      ..map[pinnedSessionsKey('c1')] = jsonEncode(['/a', '/b']);
     final c = _container(kv);
     addTearDown(c.dispose);
-    c.read(hiddenFoldersProvider);
-    await c.read(hiddenFoldersProvider.notifier).toggle('/new');
-    await _settle();
-    expect(c.read(hiddenFoldersProvider), {'/new'});
+    c.read(pinnedSessionsProvider);
+    await c.read(pinnedSessionsProvider.notifier).remove('/a');
+    expect(c.read(pinnedSessionsProvider), {'/b'});
+    final c2 = _container(kv);
+    addTearDown(c2.dispose);
+    c2.read(pinnedSessionsProvider);
+    await c2.read(pinnedSessionsProvider.notifier).clear();
+    expect(c2.read(pinnedSessionsProvider), isEmpty);
+    expect(jsonDecode(kv.map[pinnedSessionsKey('c1')]!), isEmpty);
   });
 
   test('corrupt storage decodes to an empty set', () {

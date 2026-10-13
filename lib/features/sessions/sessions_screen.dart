@@ -10,6 +10,7 @@
 // resumed (RouteAware + AppLifecycleListener), and stops otherwise.
 
 import 'dart:async';
+import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -320,7 +321,10 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       pinned: pinned,
       busy: _resuming.contains(s.file),
       onTap: _resuming.contains(s.file) ? null : () => _resume(s),
-      onLongPress: () => _savedActions(s, pinned: pinned),
+      // No actions while a resume is in flight for this row.
+      onLongPress: _resuming.contains(s.file)
+          ? null
+          : () => _savedActions(s, pinned: pinned),
     );
 
     section('Pinned', [
@@ -435,7 +439,9 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
               file: file,
               mtime: 0,
               sizeBytes: 0,
-              cwdFolder: '',
+              // displayCwd falls back to this for the cwdFallback snackbar:
+              // the transcript's folder name beats an empty string.
+              cwdFolder: basename(File(file).parent.path),
               cwd: cwd,
               title: '',
               running: false,

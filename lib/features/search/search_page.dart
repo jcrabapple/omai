@@ -47,10 +47,17 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   SearchIndexed? _indexed;
   String _lastQuery = '';
 
+  /// Saved transcript with a resume in flight: its rows show a spinner and
+  /// ignore taps until it settles.
+  String? _resuming;
+
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onChanged);
+    // The sessions screen stops polling while this page covers it; take one
+    // fresh list so 'live' tags (and which hits open vs resume) aren't stale.
+    unawaited(ref.read(sessionsStoreProvider.notifier).refresh());
   }
 
   @override
@@ -77,7 +84,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       });
       return;
     }
-    if (query == _lastQuery && _hits != null) return;
+    if (query == _lastQuery && _hits != null) {
+      if (_loading) setState(() => _loading = false);
+      return;
+    }
+    // Loading from the first keystroke (web SearchView): the debounce window
+    // shows the spinner or dims the old results instead of a blank body.
+    if (!_loading) setState(() => _loading = true);
     _debounce = Timer(
       const Duration(milliseconds: searchDebounceMs),
       () => _run(query),
@@ -104,20 +117,25 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _loading = true;
       _error = null;
     });
-    final active = ref.read(connectionNotifierProvider).active;
-    if (active == null || !mounted || gen != _gen) {
-      if (mounted && gen == _gen) {
-        setState(() => _error = 'Not signed in.');
-      }
-      return;
-    }
-    final token = await ref.read(tokenStoreProvider).read(active.id);
-    if (!mounted || gen != _gen) return;
-    final client = ref.read(gatewayClientFactoryProvider)(
-      active.url,
-      token ?? '',
-    );
     try {
+      final active = ref.read(connectionNotifierProvider).active;
+      if (active == null) {
+        if (mounted && gen == _gen) {
+          setState(() {
+            _error = 'Not signed in.';
+            _loading = false;
+          });
+        }
+        return;
+      }
+      // Inside the try: a keystore read can throw too, and must not leave
+      // the spinner running with no error.
+      final token = await ref.read(tokenStoreProvider).read(active.id);
+      if (!mounted || gen != _gen) return;
+      final client = ref.read(gatewayClientFactoryProvider)(
+        active.url,
+        token ?? '',
+      );
       final out = await client.search(query, role: _role);
       if (!mounted || gen != _gen) return;
       final parsed = SearchResponse.fromJson(out);
@@ -149,9 +167,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final gwId = liveGwIdFor(hit, live);
     if (gwId != null) {
       widget.onOpenLive(gwId);
-    } else {
-      unawaited(widget.onResume(hit.path, hit.cwd));
+      return;
     }
+    if (_resuming != null) return;
+    setState(() => _resuming = hit.path);
+    unawaited(
+      widget.onResume(hit.path, hit.cwd).whenComplete(() {
+        if (mounted) setState(() => _resuming = null);
+      }),
+    );
   }
 
   @override
@@ -166,7 +190,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         ? _StateText(_error!, color: tokens.err)
         : query.isEmpty
         ? const _StateText('Type to search. Every word is a prefix match.')
-        : _loading && hits == null
+        : _loading && (hits == null || hits.isEmpty)
         ? const Center(
             child: SizedBox(
               width: 18,
@@ -184,6 +208,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             live: live,
             loading: _loading,
             indexed: indexed,
+            resuming: _resuming,
             onOpen: (hit) => _open(hit, live),
           );
 
@@ -217,20 +242,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 ),
               ),
             ),
-            if (indexed != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  OmpMetrics.s4,
-                  OmpMetrics.s1,
-                  OmpMetrics.s4,
-                  0,
-                ),
-                child: _StateText(
-                  'Full text across ${indexed.messages} messages in '
-                  '${indexed.files} saved sessions. Thinking and tool output '
-                  'are not searched.',
-                ),
-              ),
             Padding(
               padding: const EdgeInsets.all(OmpMetrics.s4),
               child: Row(
@@ -311,6 +322,7 @@ class _Results extends StatelessWidget {
     required this.live,
     required this.loading,
     required this.indexed,
+    required this.resuming,
     required this.onOpen,
   });
 
@@ -319,6 +331,9 @@ class _Results extends StatelessWidget {
   final List<SessionInfo> live;
   final bool loading;
   final SearchIndexed? indexed;
+
+  /// Path of the transcript being resumed, if any.
+  final String? resuming;
   final void Function(SearchHit hit) onOpen;
 
   @override
@@ -333,19 +348,30 @@ class _Results extends StatelessWidget {
       ],
     ];
 
+    final idx = indexed;
     Widget child = ListView.builder(
       padding: const EdgeInsets.only(bottom: OmpMetrics.s4),
-      itemCount: rows.length,
+      // One extra row at the end: what the index covers. It sits after the
+      // results so it never pushes the list down mid-typing.
+      itemCount: rows.length + (idx != null ? 1 : 0),
       itemBuilder: (context, i) {
+        if (i == rows.length) {
+          return _StateText(
+            'Full text across ${idx!.messages} messages in ${idx.files} '
+            'saved sessions. Thinking and tool output are not searched.',
+          );
+        }
         final (group, hit) = rows[i];
+        final busy = resuming == group.path;
         if (hit == null) {
           return _GroupHeader(
             group: group,
             live: live,
-            onOpen: () => onOpen(group.hits.first),
+            busy: busy,
+            onOpen: busy ? null : () => onOpen(group.hits.first),
           );
         }
-        return _HitRow(hit: hit, onOpen: () => onOpen(hit));
+        return _HitRow(hit: hit, onOpen: busy ? null : () => onOpen(hit));
       },
     );
 
@@ -370,18 +396,41 @@ class _GroupHeader extends StatelessWidget {
   const _GroupHeader({
     required this.group,
     required this.live,
+    required this.busy,
     required this.onOpen,
   });
 
   final SearchHitGroup group;
   final List<SessionInfo> live;
-  final VoidCallback onOpen;
+  final bool busy;
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
     final hit = group.hits.first;
     final isLive = searchHitIsLive(hit, live);
+    final tag = isLive ? 'live' : (hit.archived ? 'archived' : null);
+    // One TalkBack stop per header: label, folder, tag, and what a tap does.
+    return Semantics(
+      button: true,
+      header: true,
+      label:
+          '${searchHitLabel(hit)}'
+          '${tag != null ? ', $tag' : ''}'
+          '${(hit.cwd ?? '').isNotEmpty ? ', ${hit.cwd}' : ''}',
+      hint: busy ? 'Opening' : (isLive ? 'Open session' : 'Resume session'),
+      excludeSemantics: true,
+      child: _groupHeaderBody(context, tokens, hit, isLive),
+    );
+  }
+
+  Widget _groupHeaderBody(
+    BuildContext context,
+    OmpTokens tokens,
+    SearchHit hit,
+    bool isLive,
+  ) {
     return InkWell(
       onTap: onOpen,
       child: Container(
@@ -395,9 +444,6 @@ class _GroupHeader extends StatelessWidget {
           children: [
             Expanded(
               child: Semantics(
-                button: true,
-                header: true,
-                label: searchHitLabel(hit),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
@@ -426,6 +472,18 @@ class _GroupHeader extends StatelessWidget {
                 ),
               ),
             ),
+            if (busy)
+              Padding(
+                padding: const EdgeInsets.only(left: OmpMetrics.s2),
+                child: SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: tokens.accent,
+                  ),
+                ),
+              ),
             // Web parity: 'live' wins; otherwise 'archived' only when the
             // transcript really is in the archive. Ordinary saved sessions
             // carry no tag.
@@ -480,12 +538,25 @@ class _HitRow extends StatelessWidget {
   const _HitRow({required this.hit, required this.onOpen});
 
   final SearchHit hit;
-  final VoidCallback onOpen;
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<OmpTokens>()!;
     final when = hitWhen(hit.ts);
+    final plain = snippetParts(hit.snippet).map((p) => p.text).join();
+    // One TalkBack stop per hit (role, snippet, time), like SessionRow.
+    return Semantics(
+      button: true,
+      label:
+          '${hit.role == 'user' ? 'You' : 'omp'}: $plain'
+          '${when.isNotEmpty ? ', $when' : ''}',
+      excludeSemantics: true,
+      child: _body(tokens, when),
+    );
+  }
+
+  Widget _body(OmpTokens tokens, String when) {
     return InkWell(
       onTap: onOpen,
       child: Container(
@@ -537,6 +608,7 @@ class _HitRow extends StatelessWidget {
                 ),
               ),
             ),
+            if (when.isNotEmpty) const SizedBox(width: OmpMetrics.s2),
             if (when.isNotEmpty)
               Text(
                 when,
