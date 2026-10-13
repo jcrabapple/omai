@@ -15,6 +15,7 @@ import '../api/errors.dart';
 import '../api/models.dart';
 import 'connection_notifier.dart';
 import 'grouping.dart';
+import 'rail_prefs.dart';
 import 'reviewed_store.dart';
 
 const pollMs = 5000;
@@ -260,5 +261,7 @@ final sessionGroupsProvider = Provider<SessionGroups>((ref) {
     ref.watch(sessionsClockProvider)(),
     sessions.todoActive,
     needsReview,
+    ref.watch(pinnedSessionsProvider),
+    ref.watch(hiddenFoldersProvider),
   );
 });

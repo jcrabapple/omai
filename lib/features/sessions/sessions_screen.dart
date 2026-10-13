@@ -13,6 +13,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../api/errors.dart';
@@ -20,11 +21,13 @@ import '../../api/models.dart';
 import '../../app/app.dart';
 import '../../features/new_session/new_session_sheet.dart';
 import '../../features/palette/palette_sheet.dart';
+import '../../features/search/search_page.dart';
 import '../../features/settings/settings_screen.dart';
 import '../../palette/palette.dart';
 import '../../format.dart';
 import '../../state/connection_notifier.dart';
 import '../../state/grouping.dart';
+import '../../state/rail_prefs.dart';
 import '../../state/sessions_store.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/status_glyph.dart';
@@ -143,7 +146,13 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
         groups.review.isEmpty &&
         groups.running.isEmpty &&
         groups.idle.isEmpty &&
-        groups.history.isEmpty;
+        groups.pinned.isEmpty &&
+        groups.history.isEmpty &&
+        groups.hiddenCount == 0;
+    final folders = ref.watch(_filterFoldersProvider);
+    final hidden = ref.watch(hiddenFoldersProvider);
+    // Keys for folders no longer listed (deleted, aged out) don't count.
+    final hiddenOn = folders.any((f) => hidden.contains(f.key));
 
     return Scaffold(
       backgroundColor: tokens.bg,
@@ -153,6 +162,17 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
         foregroundColor: tokens.ink,
         elevation: 0,
         actions: [
+          if (folders.length > 1 || hiddenOn)
+            IconButton(
+              tooltip: hiddenOn
+                  ? 'Filter folders, some hidden'
+                  : 'Filter folders',
+              icon: Icon(
+                hiddenOn ? Icons.filter_alt : Icons.filter_alt_outlined,
+                color: hiddenOn ? tokens.accent : null,
+              ),
+              onPressed: () => showFolderFilterSheet(context),
+            ),
           IconButton(
             tooltip: 'Search',
             icon: const Icon(Icons.search),
@@ -170,9 +190,11 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
             tooltip: 'More options',
             icon: const Icon(Icons.more_vert),
             onSelected: (v) {
+              if (v == 'search') _openSearch();
               if (v == 'signout') _signOut();
             },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'search', child: Text('Search transcripts')),
               PopupMenuItem(value: 'signout', child: Text('Sign out')),
             ],
           ),
@@ -285,20 +307,35 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
     ]);
     section('Running', [for (final s in groups.running) liveRow(s, 'running')]);
     section('Idle', [for (final s in groups.idle) liveRow(s, 'idle')]);
+
+    final liveCwds = [for (final l in sessions.live) l.cwd];
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    Widget savedRow(SavedSession s, {bool pinned = false}) => SessionRow(
+      key: ValueKey('saved:${s.file}'),
+      title: savedTitle(s, liveCwds),
+      sub:
+          '${basename(s.cwd ?? s.cwdFolder)} · '
+          '${relativeTime((s.mtime * 1000).round(), nowMs)}',
+      status: null,
+      pinned: pinned,
+      busy: _resuming.contains(s.file),
+      onTap: _resuming.contains(s.file) ? null : () => _resume(s),
+      onLongPress: () => _savedActions(s, pinned: pinned),
+    );
+
+    section('Pinned', [
+      for (final s in groups.pinned) savedRow(s, pinned: true),
+    ]);
     for (final h in groups.history) {
-      section(h.label, [
-        for (final s in h.items)
-          SessionRow(
-            key: ValueKey('saved:${s.file}'),
-            title: savedTitle(s, [for (final l in sessions.live) l.cwd]),
-            sub:
-                '${basename(s.cwd ?? s.cwdFolder)} · '
-                '${relativeTime((s.mtime * 1000).round(), DateTime.now().millisecondsSinceEpoch)}',
-            status: null,
-            busy: _resuming.contains(s.file),
-            onTap: _resuming.contains(s.file) ? null : () => _resume(s),
-          ),
-      ]);
+      section(h.label, [for (final s in h.items) savedRow(s)]);
+    }
+    if (groups.hiddenCount > 0) {
+      children.add(
+        _HiddenNote(
+          count: groups.hiddenCount,
+          onShowAll: () => ref.read(hiddenFoldersProvider.notifier).showAll(),
+        ),
+      );
     }
     if (sessions.error != null) {
       children.add(
@@ -309,9 +346,73 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       );
     }
     return ListView(
-      padding: const EdgeInsets.all(OmpMetrics.s4),
+      // The bottom inset clears the extended New session FAB (56dp + its 16dp
+      // margin): without it the last row sits under the button and can't be
+      // scrolled out from behind it.
+      padding: const EdgeInsets.fromLTRB(
+        OmpMetrics.s4,
+        OmpMetrics.s4,
+        OmpMetrics.s4,
+        OmpMetrics.s4 + fabClearance,
+      ),
       children: children,
     );
+  }
+
+  /// Long-press actions on a saved row: pin/unpin, hide its folder, resume.
+  Future<void> _savedActions(SavedSession s, {required bool pinned}) async {
+    HapticFeedback.mediumImpact();
+    final key = folderKey(s);
+    final label = folderLabel(key);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.play_arrow_outlined),
+              title: const Text('Resume'),
+              onTap: () => Navigator.pop(ctx, 'resume'),
+            ),
+            ListTile(
+              leading: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined),
+              title: Text(pinned ? 'Unpin from list' : 'Pin to top of list'),
+              onTap: () => Navigator.pop(ctx, 'pin'),
+            ),
+            if (key.isNotEmpty && !pinned)
+              ListTile(
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: Text('Hide sessions in $label'),
+                subtitle: const Text('Undo from the filter button'),
+                onTap: () => Navigator.pop(ctx, 'hide'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'resume':
+        unawaited(_resume(s));
+      case 'pin':
+        await ref.read(pinnedSessionsProvider.notifier).toggle(s.file);
+      case 'hide':
+        await ref.read(hiddenFoldersProvider.notifier).toggle(key);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Hid sessions in $label'),
+            action: SnackBarAction(
+              label: 'Undo',
+              onPressed: () =>
+                  ref.read(hiddenFoldersProvider.notifier).remove(key),
+            ),
+          ),
+        );
+    }
   }
 
   String _liveSub(SessionInfo s) {
@@ -320,6 +421,29 @@ class _SessionsScreenState extends ConsumerState<SessionsScreen>
       basename(s.cwd),
       model,
     ].where((p) => p != null && p.isNotEmpty).join(' · ');
+  }
+
+  /// Full-text transcript search; hits open live sessions or resume saved
+  /// ones on top of the search page, so Back returns to the results.
+  void _openSearch() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SearchPage(
+          onOpenLive: _openSession,
+          onResume: (file, cwd) => _resume(
+            SavedSession(
+              file: file,
+              mtime: 0,
+              sizeBytes: 0,
+              cwdFolder: '',
+              cwd: cwd,
+              title: '',
+              running: false,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _openSettings([SettingsPage? page]) {
@@ -457,7 +581,9 @@ class SessionRow extends StatelessWidget {
     this.status,
     this.badge = 0,
     this.busy = false,
+    this.pinned = false,
     this.onTap,
+    this.onLongPress,
   });
 
   final String title;
@@ -468,7 +594,14 @@ class SessionRow extends StatelessWidget {
   /// True while a resume POST runs for this row: the glyph column shows a
   /// spinner and [onTap] is expected to be null.
   final bool busy;
+
+  /// Pinned saved transcript: a pin glyph in the status column.
+  final bool pinned;
   final VoidCallback? onTap;
+
+  /// Row actions (saved rows: pin, hide folder). Exposed to TalkBack as the
+  /// long-press action.
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -476,12 +609,16 @@ class SessionRow extends StatelessWidget {
     final s = status;
     return Semantics(
       label:
-          '$title. ${s != null ? (statusLabels[s] ?? s) : ''} $sub'
+          '$title. ${pinned ? 'Pinned. ' : ''}'
+          '${s != null ? (statusLabels[s] ?? s) : ''} $sub'
           '${badge > 0 ? ', $badge waiting' : ''}',
       button: onTap != null,
+      onLongPressHint: onLongPress != null ? 'Session options' : null,
+      onLongPress: onLongPress,
       excludeSemantics: true,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(OmpMetrics.radiusMd),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 48),
@@ -506,6 +643,8 @@ class SessionRow extends StatelessWidget {
                           )
                         : status != null
                         ? StatusGlyph(status: status!)
+                        : pinned
+                        ? Icon(Icons.push_pin, size: 12, color: tokens.ink3)
                         : const SizedBox(width: 8, height: 8),
                   ),
                 ),
@@ -562,6 +701,147 @@ class SessionRow extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Bottom list inset that clears the extended FAB (56dp tall, 16dp margin).
+const double fabClearance = 88;
+
+/// The filter menu's label for a folder key: the cwd's basename, or omp's
+/// mangled folder name without its leading dashes.
+String folderLabel(String key) {
+  if (key.startsWith('/')) {
+    final b = basename(key);
+    return b.isEmpty ? '/' : b;
+  }
+  final stripped = key.replaceFirst(RegExp(r'^-+'), '');
+  return stripped.isEmpty ? key : stripped;
+}
+
+/// Folders the filter sheet lists: only transcripts it could hide count.
+final _filterFoldersProvider = Provider<List<FolderCount>>((ref) {
+  final sessions = ref.watch(sessionsStoreProvider);
+  return folderCounts(
+    sessions.saved,
+    live: sessions.live,
+    pinned: ref.watch(pinnedSessionsProvider),
+  );
+});
+
+/// Checkbox list of folders; stays open so several can be toggled at once.
+Future<void> showFolderFilterSheet(BuildContext context) =>
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (_) => const FolderFilterSheet(),
+    );
+
+class FolderFilterSheet extends ConsumerWidget {
+  const FolderFilterSheet({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = Theme.of(context).extension<OmpTokens>()!;
+    final folders = ref.watch(_filterFoldersProvider);
+    final hidden = ref.watch(hiddenFoldersProvider);
+    final store = ref.read(hiddenFoldersProvider.notifier);
+    final labels = [for (final f in folders) folderLabel(f.key)];
+    final anyHidden = folders.any((f) => hidden.contains(f.key));
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.8,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                OmpMetrics.s5,
+                0,
+                OmpMetrics.s3,
+                OmpMetrics.s2,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Semantics(
+                      header: true,
+                      child: Text(
+                        'Show folders',
+                        style: TextStyle(
+                          color: tokens.ink,
+                          fontSize: OmpMetrics.fsLg,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (anyHidden)
+                    TextButton(
+                      onPressed: store.showAll,
+                      child: const Text('Show all'),
+                    ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: folders.length,
+                itemBuilder: (context, i) {
+                  final f = folders[i];
+                  // Two folders with one basename (~/tmp and /tmp) show the
+                  // full path instead.
+                  final dup =
+                      labels.indexOf(labels[i]) !=
+                      labels.lastIndexOf(labels[i]);
+                  return CheckboxListTile(
+                    key: ValueKey('folder:${f.key}'),
+                    value: !hidden.contains(f.key),
+                    onChanged: (_) => store.toggle(f.key),
+                    title: Text(dup ? f.key : labels[i]),
+                    subtitle: Text(
+                      '${f.count} ${f.count == 1 ? 'session' : 'sessions'}',
+                    ),
+                    controlAffinity: ListTileControlAffinity.trailing,
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HiddenNote extends StatelessWidget {
+  const _HiddenNote({required this.count, required this.onShowAll});
+
+  final int count;
+  final VoidCallback onShowAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = Theme.of(context).extension<OmpTokens>()!;
+    return Padding(
+      padding: const EdgeInsets.only(top: OmpMetrics.s4, left: OmpMetrics.s1),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$count hidden by folder filter',
+              style: TextStyle(color: tokens.ink3, fontSize: OmpMetrics.fsSm),
+            ),
+          ),
+          TextButton(onPressed: onShowAll, child: const Text('Show all')),
+        ],
       ),
     );
   }

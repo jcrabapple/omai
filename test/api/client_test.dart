@@ -700,5 +700,17 @@ void main() {
       expect(r.url.path, '/api/ledger/sessions');
       expect(r.url.queryParameters, {'days': '90'});
     });
+
+    test('search query omits unset filters', () async {
+      var r = await capture((c) => c.search('foo'));
+      expect(r.url.path, '/api/search');
+      expect(r.url.queryParameters, {'q': 'foo'});
+      r = await capture((c) => c.search('foo', role: 'user', limit: 20));
+      expect(r.url.queryParameters, {
+        'q': 'foo',
+        'role': 'user',
+        'limit': '20',
+      });
+    });
   });
 }

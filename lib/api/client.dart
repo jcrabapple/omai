@@ -340,6 +340,19 @@ class GatewayClient {
   Future<Map<String, dynamic>> ledgerSessions({int days = 30}) =>
       _send('GET', '/api/ledger/sessions', query: {'days': '$days'});
 
+  /// Full-text transcript search across saved sessions (gateway v0.5.0):
+  /// `{total, results: [{path, line, role, ts, snippet, sessionId, cwd,
+  /// title, archived, gwId?}], indexed: {files, messages}}`. Matches in
+  /// `snippet` are wrapped in U+E000 / U+E001. [role] is `user` or
+  /// `assistant`; null searches both. An unsearchable query (no word
+  /// characters) is a 200 with no results.
+  Future<Map<String, dynamic>> search(String q, {String? role, int? limit}) =>
+      _send(
+        'GET',
+        '/api/search',
+        query: {'q': q, 'role': ?role, if (limit != null) 'limit': '$limit'},
+      );
+
   Future<List<Map<String, Object?>>> pendingUi(String id) async {
     final json = await _send(
       'GET',

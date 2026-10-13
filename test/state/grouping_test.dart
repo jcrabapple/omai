@@ -175,4 +175,110 @@ void main() {
           HistoryBucketKey.older);
     });
   });
+
+  // Ported from the web pins + folder-filter cases in grouping.test.ts.
+  group('pins and folder filter', () {
+    final t = sec(DateTime(2026, 9, 29, 9));
+
+    test('pinned transcripts leave the history, newest first', () {
+      final g = groupSessions(
+        [],
+        [
+          saved('/s/a.jsonl', sec(DateTime(2026, 9, 29, 7))),
+          saved('/s/b.jsonl', sec(DateTime(2026, 9, 29, 9))),
+          saved('/s/c.jsonl', sec(DateTime(2026, 9, 29, 8))),
+          saved('/s/plain.jsonl', t),
+        ],
+        now,
+        {},
+        {},
+        {'/s/a.jsonl', '/s/b.jsonl', '/s/c.jsonl'},
+      );
+      expect(g.pinned.map((s) => s.file), [
+        '/s/b.jsonl',
+        '/s/c.jsonl',
+        '/s/a.jsonl',
+      ]);
+      expect(g.history.expand((h) => h.items).map((s) => s.file), [
+        '/s/plain.jsonl',
+      ]);
+    });
+
+    test('a pinned transcript that is live shows only as live', () {
+      final g = groupSessions(
+        [
+          live('l', {'ompSessionFile': '/s/p.jsonl'}),
+        ],
+        [saved('/s/p.jsonl', t)],
+        now,
+        {},
+        {},
+        {'/s/p.jsonl'},
+      );
+      expect(g.pinned, isEmpty);
+      expect(g.idle.map((s) => s.gwId), ['l']);
+    });
+
+    test('folder filter hides history by cwd, never live or pinned', () {
+      final g = groupSessions(
+        [
+          live('l', {'ompSessionFile': '/s/live.jsonl'}),
+        ],
+        [
+          saved('/s/keep.jsonl', t, {'cwd': '/w/projects'}),
+          saved('/s/cron1.jsonl', t, {'cwd': '/home/j'}),
+          saved('/s/cron2.jsonl', t, {'cwd': '/home/j'}),
+          saved('/s/pinned.jsonl', t, {'cwd': '/home/j'}),
+          saved('/s/live.jsonl', t, {'cwd': '/home/j'}),
+          saved('/s/nocwd.jsonl', t, {'cwd': null, 'cwdFolder': '--tmp--'}),
+        ],
+        now,
+        {},
+        {},
+        {'/s/pinned.jsonl'},
+        {'/home/j', '--tmp--'},
+      );
+      expect(g.history.expand((h) => h.items).map((s) => s.file), [
+        '/s/keep.jsonl',
+      ]);
+      expect(g.pinned.map((s) => s.file), ['/s/pinned.jsonl']);
+      expect(g.idle.map((s) => s.gwId), ['l']);
+      expect(g.hiddenCount, 3);
+    });
+
+    test('hiddenCount is 0 without a filter', () {
+      final g = groupSessions([], [
+        saved('/s/a.jsonl', t, {'cwd': '/x'}),
+      ], now);
+      expect(g.hiddenCount, 0);
+      expect(g.pinned, isEmpty);
+    });
+
+    test('folderCounts: filterable only, busiest first, ties by name', () {
+      final counts = folderCounts(
+        [
+          saved('/s/1', t, {'cwd': '/b'}),
+          saved('/s/2', t, {'cwd': '/a'}),
+          saved('/s/3', t, {'cwd': '/c'}),
+          saved('/s/4', t, {'cwd': '/c'}),
+          saved('/s/5', t, {'cwd': null, 'cwdFolder': '--tmp--'}),
+          saved('/s/pin', t, {'cwd': '/c'}),
+          saved('/s/run', t, {'cwd': '/c', 'running': true}),
+          saved('/s/live', t, {'cwd': '/c'}),
+          saved('/s/exited', t, {'cwd': '/a'}),
+        ],
+        live: [
+          live('l', {'ompSessionFile': '/s/live'}),
+          live('x', {'ompSessionFile': '/s/exited', 'exited': true}),
+        ],
+        pinned: {'/s/pin'},
+      );
+      expect(counts, const [
+        FolderCount('/a', 2),
+        FolderCount('/c', 2),
+        FolderCount('--tmp--', 1),
+        FolderCount('/b', 1),
+      ]);
+    });
+  });
 }
